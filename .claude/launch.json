@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "sagex-hours",
+      "runtimeExecutable": "cargo",
+      "runtimeArgs": ["run", "--quiet", "--", "serve", "--port", "8099"],
+      "port": 8099
+    }
+  ]
+}

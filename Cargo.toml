@@ -1,0 +1,32 @@
+[package]
+name = "sagex-hours"
+version = "0.1.0"
+edition = "2021"
+description = "Saisie des heures SageX : base JSON en clair, API HTTP, UI web, export xlsx"
+
+[dependencies]
+anyhow = "1"
+axum = { version = "0.8", features = ["macros"] }
+chrono = { version = "0.4", features = ["serde"] }
+futures-core = "0.3"
+clap = { version = "4", features = ["derive", "env"] }
+mime_guess = "2"
+notify = "8"
+notify-debouncer-full = "0.5"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+ron = "0.8"
+rust-embed = "8"
+rust_xlsxwriter = "0.89"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "fs"] }
+tokio-stream = { version = "0.1", features = ["sync"] }
+tower-http = { version = "0.6", features = ["trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+ulid = "1"
+zip = { version = "2", default-features = false, features = ["deflate"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Projets, activités et tâches — SageX</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='14'>⚙</text></svg>">
+  <style>
+    body { overflow: auto; }
+    .page { max-width: 1000px; margin: 0 auto; padding: 16px 20px 60px; }
+    .tabs { display: flex; gap: 2px; margin-bottom: 16px; background: var(--surface-2); padding: 2px; border-radius: var(--radius); width: fit-content; }
+    .tabs button { border: none; background: none; padding: 5px 14px; }
+    .tabs button[aria-pressed="true"] { background: var(--surface); box-shadow: var(--shadow); color: var(--accent); }
+    td input, td select { border-color: transparent; background: none; padding: 3px 5px; }
+    td input:hover, td select:hover { border-color: var(--border); background: var(--surface); }
+    td { vertical-align: middle; padding: 3px 10px; }
+    th { padding: 6px 10px; }
+    .id { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 11px; color: var(--text-dim); }
+    .swatch { width: 26px; height: 22px; padding: 0; border: 1px solid var(--border); border-radius: 4px; }
+    .archived td:not(:last-child) { opacity: .45; }
+    .add-row td { background: var(--surface-2); }
+  </style>
+</head>
+<body>
+<div class="page">
+  <h1 style="font-size:16px;margin:0 0 4px">Projets, activités et tâches</h1>
+  <p class="hint" style="margin:0 0 16px">
+    Les trois listes sont indépendantes : n'importe quelle activité peut servir à n'importe quel projet, comme dans SageX.
+    Les identifiants (en gris) sont ceux à utiliser dans l'API.
+  </p>
+
+  <div class="tabs" role="group">
+    <button data-tab="projects" aria-pressed="true">Projets SageX</button>
+    <button data-tab="activities" aria-pressed="false">Activités SageX</button>
+    <button data-tab="presets" aria-pressed="false">Tâches</button>
+    <button data-tab="settings" aria-pressed="false">Réglages</button>
+  </div>
+
+  <div id="panel"></div>
+</div>
+<script type="module" src="/js/manage.js"></script>
+</body>
+</html>

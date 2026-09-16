@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Heures SageX</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='14'>⏱</text></svg>">
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <div class="brand">Heures <small>SageX</small></div>
+
+    <div class="segmented" role="group" aria-label="Vue">
+      <button id="tab-week" aria-pressed="true">Semaine</button>
+      <button id="tab-month" aria-pressed="false">Mois</button>
+    </div>
+
+    <div class="period">
+      <button id="prev" class="ghost" title="Période précédente">‹</button>
+      <button id="today" class="ghost">Aujourd'hui</button>
+      <button id="next" class="ghost" title="Période suivante">›</button>
+      <h1 id="period-label">—</h1>
+    </div>
+
+    <div class="spacer"></div>
+
+    <div class="totals" id="totals"></div>
+    <div class="timer-box" id="timer">
+      <span class="elapsed">—</span>
+      <button id="timer-toggle" class="ghost" title="Démarrer un chronomètre">▶</button>
+    </div>
+
+    <button id="open-manage" title="Projets, activités et tâches">Gérer</button>
+  </header>
+
+  <div class="banner" id="backup-banner" hidden>
+    <span id="backup-text"></span>
+    <div class="spacer"></div>
+    <button id="backup-now" class="primary">Télécharger la sauvegarde</button>
+    <button id="backup-later" class="ghost">Plus tard</button>
+  </div>
+
+  <main>
+    <aside class="sidebar">
+      <h2>Tâches</h2>
+      <div class="search"><input id="preset-search" type="search" placeholder="Filtrer…" autocomplete="off"></div>
+      <div class="preset-list" id="preset-list"></div>
+      <div class="hint" style="padding: 0 12px 10px">
+        Clic : ajoute au jour sélectionné. Glisser : dépose à l'heure voulue.
+      </div>
+    </aside>
+
+    <section class="view" id="view-week"></section>
+    <section class="view" id="view-month" hidden></section>
+
+    <aside class="editor" id="editor" hidden>
+      <header>
+        <h2 id="editor-title">Saisie</h2>
+        <button id="editor-close" class="ghost" title="Fermer">✕</button>
+      </header>
+      <div class="body">
+        <div class="field">
+          <label for="f-preset">Tâche</label>
+          <select id="f-preset"><option value="">—</option></select>
+        </div>
+        <div class="field">
+          <label for="f-project">Projet SageX</label>
+          <select id="f-project"></select>
+        </div>
+        <div class="field">
+          <label for="f-activity">Activité SageX</label>
+          <select id="f-activity"></select>
+        </div>
+        <div class="field">
+          <label for="f-comment">Commentaire <span class="hint">(colonne « Remarque »)</span></label>
+          <textarea id="f-comment" rows="3"></textarea>
+        </div>
+        <div class="field">
+          <label for="f-date">Date</label>
+          <input id="f-date" type="date">
+        </div>
+        <div class="row">
+          <div class="field">
+            <label for="f-start">Début</label>
+            <input id="f-start" type="time" step="300">
+          </div>
+          <div class="field">
+            <label for="f-end">Fin</label>
+            <input id="f-end" type="time" step="300">
+          </div>
+          <div class="field">
+            <label for="f-duration">Durée</label>
+            <input id="f-duration" type="text" placeholder="1h30">
+          </div>
+        </div>
+        <div class="hint" id="editor-hint"></div>
+      </div>
+      <footer>
+        <button id="editor-save" class="primary">Enregistrer</button>
+        <button id="editor-duplicate">Dupliquer</button>
+        <div class="spacer" style="flex:1"></div>
+        <button id="editor-delete" class="danger">Supprimer</button>
+      </footer>
+    </aside>
+  </main>
+</div>
+
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>

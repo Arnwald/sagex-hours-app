@@ -12,6 +12,12 @@ App de saisie des heures SageX. Base JSON en clair dans `data/`, API HTTP, UI we
 
 Si l'instance exige un jeton : `-H "X-Auth-Token: $SAGEX_TOKEN"`.
 
+**Avant toute chose**, vérifier que le serveur répond :
+`curl -s -m 2 localhost:8080/api/settings`. S'il ne répond pas, le démarrer
+depuis la racine du projet : `cargo run --quiet -- serve` (il reste au
+premier plan — le lancer en tâche de fond). Instance distante : remplacer
+`localhost:8080` par son adresse dans toutes les commandes ci-dessous.
+
 ## Les trois listes
 
 - **projects** — projets SageX : `{id, sagex_number, name, color, exportable, archived}`.

@@ -6,6 +6,8 @@ import { escapeHtml } from './format.js';
 let catalog = { projects: [], activities: [], presets: [] };
 let settings = null;
 let tab = 'projects';
+/** Message de la dernière restauration : le rechargement reconstruit le panneau. */
+let notice = '';
 
 const panel = () => document.getElementById('panel');
 
@@ -227,11 +229,11 @@ function renderSettings() {
         </p>
         <div class="row" style="align-items:center">
           <button class="primary" id="backup" style="flex:0 0 auto">Télécharger la base</button>
-          <label class="hint" style="flex:0 0 auto">Restaurer :
-            <input id="restore" type="file" accept=".zip" style="width:auto;display:inline-block"></label>
+          <label class="hint" for="restore" style="flex:0 0 auto">Restaurer :</label>
+          <input id="restore" type="file" accept=".zip" style="flex:0 0 auto;width:auto">
           <div class="spacer" style="flex:1"></div>
         </div>
-        <p class="hint" id="restore-status"></p>
+        <p class="hint" id="restore-status">${escapeHtml(notice)}</p>
       </div>
     </div>`;
 
@@ -249,22 +251,41 @@ function renderSettings() {
     window.location.href = downloadUrl('/api/backup');
   });
 
-  document.getElementById('restore').addEventListener('change', async (event) => {
+  const restore = document.getElementById('restore');
+  restore.addEventListener('change', async (event) => {
     const file = event.target.files[0];
     if (!file) return;
     const status = document.getElementById('restore-status');
+    status.textContent = `Lecture de ${file.name}…`;
     const bytes = await file.arrayBuffer();
-    const inspect = await fetch(downloadUrl('/api/restore?dry_run=true'), { method: 'POST', body: bytes });
-    const preview = await inspect.json();
-    if (!inspect.ok) { status.textContent = preview.error; return; }
-    if (!confirm(`Restaurer ${preview.files.length} fichier(s) (${preview.months} mois) ?\n\nLa base actuelle sera d'abord copiée dans backups/.`)) return;
 
-    const response = await fetch(downloadUrl('/api/restore'), { method: 'POST', body: bytes });
-    const result = await response.json();
-    status.textContent = response.ok
-      ? `Restauré : ${result.restored} fichier(s). Sauvegarde de sécurité : ${result.safety_backup}`
-      : result.error;
-    if (response.ok) await load();
+    try {
+      const inspect = await fetch(downloadUrl('/api/restore?dry_run=true'), { method: 'POST', body: bytes });
+      const preview = await inspect.json();
+      if (!inspect.ok) throw new Error(preview.error);
+
+      if (!confirm(`Restaurer ${preview.files.length} fichier(s) (${preview.months} mois) depuis ${file.name} ?\n\n`
+        + `La base actuelle sera d'abord copiée dans backups/.`)) {
+        status.textContent = 'Restauration annulée.';
+        return;
+      }
+
+      const response = await fetch(downloadUrl('/api/restore'), { method: 'POST', body: bytes });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error);
+
+      // La restauration diffuse un évènement : `load()` reconstruit le panneau,
+      // d'où le passage par `notice` plutôt que par le nœud courant.
+      notice = `Restauré : ${result.restored} fichier(s), ${result.months} mois. `
+             + `Sauvegarde de sécurité : ${result.safety_backup}`;
+      await load();
+    } catch (error) {
+      notice = '';
+      status.textContent = `Échec : ${error.message}`;
+    } finally {
+      // Permet de resélectionner le même fichier après un échec.
+      restore.value = '';
+    }
   });
 }
 
@@ -315,7 +336,7 @@ async function guard(action) {
 }
 
 document.querySelectorAll('[data-tab]').forEach((button) => {
-  button.addEventListener('click', () => { tab = button.dataset.tab; render(); });
+  button.addEventListener('click', () => { tab = button.dataset.tab; notice = ''; render(); });
 });
 
 listen(() => load());

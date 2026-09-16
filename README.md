@@ -138,15 +138,30 @@ signalé.
 délai configuré (7 jours par défaut), l'interface propose la sauvegarde à
 l'ouverture. La restauration copie d'abord l'état courant dans `backups/`.
 
-## Déploiement
+## Déploiement (TrueNAS + Dockge)
 
-```bash
-docker compose up -d --build
-```
+Un push sur `main` déclenche le workflow [`image.yml`](.github/workflows/image.yml)
+qui publie `ghcr.io/arnwald/sagex-hours-app:latest`. Dockge n'a plus qu'à tirer
+cette image : le bouton *Update* d'une pile suffit ensuite pour mettre à jour.
 
-Le binaire embarque l'interface ; seul `/data` est à monter. Sur TrueNAS SCALE,
-monter un dataset sur `/data`, aligner `user:` sur son propriétaire, et
-**définir `SAGEX_TOKEN`** dès que l'app est joignable hors du réseau local.
+1. **Dataset** — en créer un pour la base, par exemple `tank/apps/sagex-hours`,
+   propriétaire `apps` (UID 568).
+2. **Paquet GHCR** — le dépôt est privé, donc l'image l'est aussi. Sur le NAS :
+   `docker login ghcr.io -u <compte> -p <PAT avec read:packages>`.
+   (ou rendre le paquet public dans *Packages → Package settings*)
+3. **Pile Dockge** — coller [`deploy/compose.yaml`](deploy/compose.yaml) et adapter
+   le port, le chemin du dataset et `SAGEX_TOKEN`.
+4. **Reprendre la base** — sur l'instance locale, *Gérer → Réglages → Télécharger
+   la base*, puis sur celle du NAS, *Restaurer* avec ce zip.
+
+`SAGEX_TOKEN` n'est pas optionnel dès que l'app est joignable au-delà du réseau
+local : sans lui, l'API est ouverte en lecture et en écriture. Le navigateur le
+demande une fois et le retient.
+
+Pour construire sans registre (le dépôt cloné sur le NAS, dans le dossier de la
+pile) : `docker compose up -d --build` avec le [`docker-compose.yml`](docker-compose.yml)
+de la racine. C'est plus lourd — la compilation Rust se refait sur le NAS à chaque
+mise à jour.
 
 ## Développement
 

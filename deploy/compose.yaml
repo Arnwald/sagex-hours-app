@@ -1,0 +1,28 @@
+# Pile à coller dans Dockge (Compose → nouvelle pile → coller → Déployer).
+#
+# Avant de déployer, adapter les trois valeurs marquées « À ADAPTER ».
+
+services:
+  sagex-hours:
+    image: ghcr.io/arnwald/sagex-hours-app:latest
+    container_name: sagex-hours
+    restart: unless-stopped
+
+    ports:
+      # À ADAPTER si 8099 est déjà pris sur le NAS.
+      - "8099:8080"
+
+    environment:
+      TZ: Europe/Zurich
+      # À ADAPTER — obligatoire : sans jeton, quiconque atteint ce port
+      # lit et modifie tes heures. Génère-le avec : openssl rand -hex 24
+      SAGEX_TOKEN: "REMPLACE-MOI"
+
+    volumes:
+      # À ADAPTER — dataset TrueNAS qui contiendra la base en clair
+      # (catalog.json, settings.json, entries/, backups/).
+      - /mnt/tank/apps/sagex-hours:/data
+
+    # L'utilisateur « apps » de TrueNAS SCALE. Le dataset ci-dessus doit lui
+    # appartenir. Commenter cette ligne pour tourner en root à la place.
+    user: "568:568"

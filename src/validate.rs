@@ -1,6 +1,6 @@
-//! Totaux et contrôles d'un mois avant envoi dans SageX.
+//! Totals and checks of a month before it goes to SageX.
 
-use crate::export;
+use crate::export::{self, SkipKind};
 use crate::model::{Catalog, Entry, YearMonth};
 use crate::settings::Settings;
 use chrono::{Datelike, Duration, NaiveDate, Weekday};
@@ -10,9 +10,9 @@ use std::collections::BTreeMap;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Severity {
-  /// Bloque l'export : SageX refuserait la ligne ou la fausserait.
+  /// Blocks the export: SageX would refuse the row or get it wrong.
   Error,
-  /// À vérifier, mais l'export reste possible.
+  /// Worth a look, but the export stays possible.
   Warning,
   Info,
 }
@@ -49,13 +49,13 @@ pub struct Report {
   pub month: String,
   pub from: NaiveDate,
   pub to: NaiveDate,
-  /// Total saisi, export exclu compris.
+  /// Total entered, including what is not exported.
   pub total_minutes: u32,
-  /// Total qui partira dans SageX.
+  /// Total that will go to SageX.
   pub exported_minutes: u32,
-  /// Total des projets marqués « non exportable » (vacances, récupération…).
+  /// Total of the projects marked not exportable (holidays, time off in lieu…).
   pub excluded_minutes: u32,
-  /// Attendu = jours ouvrables × imputation quotidienne × taux d'activité.
+  /// Expected = working days × daily hours × activity rate.
   pub expected_minutes: u32,
   pub working_days: usize,
   pub holidays: Vec<DayTotal>,
@@ -72,7 +72,7 @@ impl Report {
   }
 }
 
-/// Journée au-delà de laquelle on signale une saisie suspecte.
+/// A day longer than this is flagged.
 const LONG_DAY_MINUTES: u32 = 12 * 60;
 
 pub fn report(month: YearMonth, entries: &[Entry], catalog: &Catalog, settings: &Settings) -> Report {
@@ -81,40 +81,50 @@ pub fn report(month: YearMonth, entries: &[Entry], catalog: &Catalog, settings: 
   let export = export::build(entries, catalog, settings, Some(month));
   let mut issues = Vec::new();
 
-  // -- cohérence des réglages ----------------------------------------------
+  // -- settings ------------------------------------------------------------
   if settings.employee_number == 0 || settings.person_number == 0 {
     issues.push(Issue {
       severity: Severity::Error,
-      code: "settings-incomplets",
-      message: "n° de collaborateur ou n° de personne manquant dans les réglages : l'import SageX échouerait".to_string(),
+      code: "incomplete-settings",
+      message: tr!("employee number or person number missing in the settings: the SageX import would fail"),
       date: None,
       entry_ids: Vec::new(),
     });
   }
 
-  // -- références et exclusions --------------------------------------------
+  // -- references and exclusions ------------------------------------------
   for skipped in &export.skipped {
-    let severity = if skipped.reason.contains("absent") { Severity::Error } else { Severity::Info };
+    let (severity, code) = match skipped.kind {
+      SkipKind::UnknownProject | SkipKind::UnknownActivity => (Severity::Error, "unknown-reference"),
+      SkipKind::NotExported | SkipKind::ZeroDuration => (Severity::Info, "not-exported"),
+    };
     issues.push(Issue {
       severity,
-      code: if severity == Severity::Error { "reference-inconnue" } else { "hors-export" },
-      message: format!("{} ({}) — {}", skipped.date, export::format_hours(skipped.minutes), skipped.reason),
+      code,
+      message: tr!(
+        "{date} ({hours}) — {reason}",
+        date = skipped.date,
+        hours = export::format_hours(skipped.minutes),
+        reason = skipped.reason
+      ),
       date: Some(skipped.date),
       entry_ids: vec![skipped.entry_id.clone()],
     });
   }
 
-  // -- longueur des commentaires -------------------------------------------
+  // -- comment length ------------------------------------------------------
   let max = settings.export.comment_max_len;
   for row in &export.rows {
     let length = row.comment.chars().count();
     if length >= max {
       issues.push(Issue {
         severity: Severity::Error,
-        code: "commentaire-trop-long",
-        message: format!(
-          "le commentaire du projet {} / activité {} atteint la limite de {max} caractères et sera tronqué — passe le style de commentaire en « compact » ou découpe la ligne",
-          row.project_number, row.activity_number
+        code: "comment-too-long",
+        message: tr!(
+          "the comment of project {project} / activity {activity} reaches the {max}-character limit and will be cut — switch the comment style to “compact” or split the line",
+          project = row.project_number,
+          activity = row.activity_number,
+          max = max
         ),
         date: Some(row.date),
         entry_ids: row.entry_ids.clone(),
@@ -122,13 +132,13 @@ pub fn report(month: YearMonth, entries: &[Entry], catalog: &Catalog, settings: 
     }
   }
 
-  // -- saisies elles-mêmes --------------------------------------------------
+  // -- the entries themselves ---------------------------------------------
   for entry in entries {
     if !month.contains(entry.date) {
       issues.push(Issue {
         severity: Severity::Error,
-        code: "hors-mois",
-        message: format!("saisie datée du {} alors que le mois exporté est {month}", entry.date),
+        code: "outside-month",
+        message: tr!("entry dated {date} while the exported month is {month}", date = entry.date, month = month),
         date: Some(entry.date),
         entry_ids: vec![entry.id.clone()],
       });
@@ -136,15 +146,15 @@ pub fn report(month: YearMonth, entries: &[Entry], catalog: &Catalog, settings: 
     if entry.minutes == 0 {
       issues.push(Issue {
         severity: Severity::Warning,
-        code: "duree-nulle",
-        message: format!("saisie sans durée le {}", entry.date),
+        code: "zero-duration",
+        message: tr!("entry without duration on {date}", date = entry.date),
         date: Some(entry.date),
         entry_ids: vec![entry.id.clone()],
       });
     }
   }
 
-  // -- chevauchements et journées longues ----------------------------------
+  // -- overlaps and long days ----------------------------------------------
   let mut per_day: BTreeMap<NaiveDate, Vec<&Entry>> = BTreeMap::new();
   for entry in entries {
     per_day.entry(entry.date).or_default().push(entry);
@@ -155,8 +165,8 @@ pub fn report(month: YearMonth, entries: &[Entry], catalog: &Catalog, settings: 
     if minutes > LONG_DAY_MINUTES {
       issues.push(Issue {
         severity: Severity::Warning,
-        code: "journee-longue",
-        message: format!("{} imputées le {date}", export::format_hours(minutes)),
+        code: "long-day",
+        message: tr!("{hours} entered on {date}", hours = export::format_hours(minutes), date = date),
         date: Some(*date),
         entry_ids: day_entries.iter().map(|e| e.id.clone()).collect(),
       });
@@ -173,10 +183,14 @@ pub fn report(month: YearMonth, entries: &[Entry], catalog: &Catalog, settings: 
       if second_start < first_end {
         issues.push(Issue {
           severity: Severity::Warning,
-          code: "chevauchement",
-          message: format!(
-            "le {date}, « {} » finit à {} mais « {} » commence à {}",
-            label(first), first_end.format("%H:%M"), label(second), second_start.format("%H:%M")
+          code: "overlap",
+          message: tr!(
+            "on {date}, “{first}” ends at {end} but “{second}” starts at {start}",
+            date = date,
+            first = label(first),
+            end = first_end.format("%H:%M"),
+            second = label(second),
+            start = second_start.format("%H:%M")
           ),
           date: Some(*date),
           entry_ids: vec![first.id.clone(), second.id.clone()],
@@ -185,7 +199,7 @@ pub fn report(month: YearMonth, entries: &[Entry], catalog: &Catalog, settings: 
     }
   }
 
-  // -- totaux ---------------------------------------------------------------
+  // -- totals --------------------------------------------------------------
   let holidays = holidays(month.year, settings);
   let mut by_day = Vec::new();
   let mut working_days = 0;
@@ -210,18 +224,18 @@ pub fn report(month: YearMonth, entries: &[Entry], catalog: &Catalog, settings: 
   let excluded_minutes = total_minutes.saturating_sub(exported_minutes);
   let expected_minutes = working_days as u32 * settings.expected_minutes_per_day();
 
-  // Écart supérieur à une demi-journée : cela vaut un coup d'œil.
+  // A gap over half a day is worth a look.
   let gap = total_minutes as i64 - expected_minutes as i64;
   if gap.abs() > (settings.expected_minutes_per_day() / 2) as i64 {
     issues.push(Issue {
       severity: Severity::Warning,
-      code: "total-inattendu",
-      message: format!(
-        "{} saisies pour {} attendues ({working_days} jours ouvrables) — écart de {}{}",
-        export::format_hours(total_minutes),
-        export::format_hours(expected_minutes),
-        if gap > 0 { "+" } else { "−" },
-        export::format_hours(gap.unsigned_abs() as u32)
+      code: "unexpected-total",
+      message: tr!(
+        "{total} entered for {expected} expected ({days} working days) — gap of {gap}",
+        total = export::format_hours(total_minutes),
+        expected = export::format_hours(expected_minutes),
+        days = working_days,
+        gap = format!("{}{}", if gap > 0 { "+" } else { "−" }, export::format_hours(gap.unsigned_abs() as u32))
       ),
       date: None,
       entry_ids: Vec::new(),
@@ -264,9 +278,9 @@ fn totals(entries: &[Entry], catalog: &Catalog, by_project: bool) -> Vec<Total> 
     .into_iter()
     .map(|(id, minutes)| {
       let (name, number) = if by_project {
-        catalog.project(&id).map(|p| (p.name.clone(), p.sagex_number)).unwrap_or((format!("{id} (inconnu)"), 0))
+        catalog.project(&id).map(|p| (p.name.clone(), p.sagex_number)).unwrap_or((tr!("{id} (unknown)", id = id), 0))
       } else {
-        catalog.activity(&id).map(|a| (a.name.clone(), a.sagex_number)).unwrap_or((format!("{id} (inconnue)"), 0))
+        catalog.activity(&id).map(|a| (a.name.clone(), a.sagex_number)).unwrap_or((tr!("{id} (unknown)", id = id), 0))
       };
       Total { id, name, sagex_number: number, minutes }
     })
@@ -276,45 +290,45 @@ fn totals(entries: &[Entry], catalog: &Catalog, by_project: bool) -> Vec<Total> 
 }
 
 // ---------------------------------------------------------------------------
-// Jours fériés
+// Public holidays
 // ---------------------------------------------------------------------------
 
-/// Fériés valaisans de l'année, plus ceux ajoutés dans les réglages.
+/// The year's public holidays in Valais, plus those added in the settings.
 ///
-/// La liste est indicative : elle sert au calcul du total attendu et reste
-/// ajustable via `extra_holidays`.
+/// The list is indicative: it serves the expected total and stays adjustable
+/// through `extra_holidays`.
 pub fn holidays(year: i32, settings: &Settings) -> Vec<(NaiveDate, String)> {
   let mut out: Vec<(NaiveDate, String)> = Vec::new();
   if settings.compute_holidays {
     let easter = easter_sunday(year);
-    let fixed: [(u32, u32, &str); 7] = [
-      (1, 1, "Nouvel An"),
-      (3, 19, "Saint-Joseph"),
-      (8, 1, "Fête nationale"),
-      (8, 15, "Assomption"),
-      (11, 1, "Toussaint"),
-      (12, 8, "Immaculée Conception"),
-      (12, 25, "Noël"),
+    let fixed: [(u32, u32, String); 7] = [
+      (1, 1, tr!("New Year's Day")),
+      (3, 19, tr!("Saint Joseph's Day")),
+      (8, 1, tr!("Swiss National Day")),
+      (8, 15, tr!("Assumption")),
+      (11, 1, tr!("All Saints' Day")),
+      (12, 8, tr!("Immaculate Conception")),
+      (12, 25, tr!("Christmas")),
     ];
     for (month, day, name) in fixed {
       if let Some(date) = NaiveDate::from_ymd_opt(year, month, day) {
-        out.push((date, name.to_string()));
+        out.push((date, name));
       }
     }
-    for (offset, name) in [(1, "Lundi de Pâques"), (39, "Ascension"), (50, "Lundi de Pentecôte"), (60, "Fête-Dieu")] {
-      out.push((easter + Duration::days(offset), name.to_string()));
+    for (offset, name) in [(1, tr!("Easter Monday")), (39, tr!("Ascension")), (50, tr!("Whit Monday")), (60, tr!("Corpus Christi"))] {
+      out.push((easter + Duration::days(offset), name));
     }
   }
   for date in &settings.extra_holidays {
     if date.year() == year && !out.iter().any(|(d, _)| d == date) {
-      out.push((*date, "Férié (réglages)".to_string()));
+      out.push((*date, tr!("Holiday (settings)")));
     }
   }
   out.sort_by_key(|(date, _)| *date);
   out
 }
 
-/// Comput grégorien (algorithme de Meeus/Jones/Butcher).
+/// Gregorian computus (Meeus/Jones/Butcher algorithm).
 pub fn easter_sunday(year: i32) -> NaiveDate {
   let a = year % 19;
   let b = year / 100;
@@ -330,7 +344,7 @@ pub fn easter_sunday(year: i32) -> NaiveDate {
   let m = (a + 11 * h + 22 * l) / 451;
   let month = (h + l - 7 * m + 114) / 31;
   let day = ((h + l - 7 * m + 114) % 31) + 1;
-  NaiveDate::from_ymd_opt(year, month as u32, day as u32).expect("date de Pâques valide")
+  NaiveDate::from_ymd_opt(year, month as u32, day as u32).expect("a valid Easter date")
 }
 
 #[cfg(test)]
@@ -385,21 +399,21 @@ mod tests {
     let days = holidays(2026, &settings());
     let ascension = days.iter().find(|(_, name)| name == "Ascension").unwrap().0;
     assert_eq!(ascension, NaiveDate::from_ymd_opt(2026, 5, 14).unwrap());
-    assert!(days.iter().any(|(d, n)| n == "Saint-Joseph" && *d == NaiveDate::from_ymd_opt(2026, 3, 19).unwrap()));
+    assert!(days.iter().any(|(d, n)| n == "Saint Joseph's Day" && *d == NaiveDate::from_ymd_opt(2026, 3, 19).unwrap()));
   }
 
   #[test]
   fn overlapping_entries_are_flagged() {
     let entries = vec![entry("2026-09-14", Some("08:00"), 120, "spl-base"), entry("2026-09-14", Some("09:00"), 60, "spl-base")];
     let report = report("2026-09".parse().unwrap(), &entries, &catalog(), &settings());
-    assert!(codes(&report).contains(&"chevauchement"), "{:?}", codes(&report));
+    assert!(codes(&report).contains(&"overlap"), "{:?}", codes(&report));
   }
 
   #[test]
   fn adjacent_entries_do_not_overlap() {
     let entries = vec![entry("2026-09-14", Some("08:00"), 60, "spl-base"), entry("2026-09-14", Some("09:00"), 60, "spl-base")];
     let report = report("2026-09".parse().unwrap(), &entries, &catalog(), &settings());
-    assert!(!codes(&report).contains(&"chevauchement"), "{:?}", codes(&report));
+    assert!(!codes(&report).contains(&"overlap"), "{:?}", codes(&report));
   }
 
   #[test]
@@ -409,7 +423,7 @@ mod tests {
     assert_eq!(report.total_minutes, 960);
     assert_eq!(report.exported_minutes, 480);
     assert_eq!(report.excluded_minutes, 480);
-    assert!(codes(&report).contains(&"hors-export"));
+    assert!(codes(&report).contains(&"not-exported"));
   }
 
   #[test]
@@ -417,25 +431,25 @@ mod tests {
     let entries = vec![entry("2026-09-14", None, 60, "projet-supprime")];
     let report = report("2026-09".parse().unwrap(), &entries, &catalog(), &settings());
     assert!(report.has_errors());
-    assert!(codes(&report).contains(&"reference-inconnue"));
+    assert!(codes(&report).contains(&"unknown-reference"));
   }
 
   #[test]
   fn entry_outside_the_month_is_an_error() {
     let entries = vec![entry("2026-10-01", None, 60, "spl-base")];
     let report = report("2026-09".parse().unwrap(), &entries, &catalog(), &settings());
-    assert!(codes(&report).contains(&"hors-mois"));
+    assert!(codes(&report).contains(&"outside-month"));
   }
 
   #[test]
   fn expected_hours_account_for_weekends_and_holidays() {
-    // Septembre 2026 : 22 jours ouvrables, aucun férié valaisan.
+    // September 2026: 22 working days, no Valais holiday.
     let september = report("2026-09".parse().unwrap(), &[], &catalog(), &settings());
     assert_eq!(september.working_days, 22);
     assert_eq!(september.expected_minutes, 22 * 492);
     assert!(september.holidays.is_empty());
 
-    // Août 2026 : le 1er tombe un samedi, le 15 un samedi également.
+    // August 2026: the 1st falls on a Saturday, and so does the 15th.
     let august = report("2026-08".parse().unwrap(), &[], &catalog(), &settings());
     assert_eq!(august.working_days, 21);
   }
@@ -444,6 +458,6 @@ mod tests {
   fn missing_identity_blocks_the_export() {
     let report = report("2026-09".parse().unwrap(), &[], &catalog(), &Settings::default());
     assert!(report.has_errors());
-    assert!(codes(&report).contains(&"settings-incomplets"));
+    assert!(codes(&report).contains(&"incomplete-settings"));
   }
 }

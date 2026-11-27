@@ -1,7 +1,7 @@
-//! Service des fichiers de l'interface, embarqués dans le binaire.
+//! Serves the interface's files, embedded in the binary.
 //!
-//! En debug, `rust-embed` relit le dossier `web/` à chaque requête : on peut
-//! modifier l'interface sans recompiler.
+//! In debug builds, `rust-embed` reads the `web/` folder again on every
+//! request: the interface can be changed without recompiling.
 
 use axum::extract::Path;
 use axum::http::{header, StatusCode, Uri};
@@ -31,11 +31,11 @@ fn page(path: &str) -> Response {
       let mime = mime_guess::from_path(path).first_or_octet_stream();
       ([(header::CONTENT_TYPE, mime.as_ref())], file.data.into_owned()).into_response()
     }
-    None => (StatusCode::NOT_FOUND, "introuvable").into_response(),
+    None => (StatusCode::NOT_FOUND, "not found").into_response(),
   }
 }
 
-/// Utilisé par le routeur principal pour les URL inconnues.
+/// Used by the main router for unknown URLs.
 pub async fn not_found(uri: Uri) -> Response {
-  (StatusCode::NOT_FOUND, format!("introuvable : {uri}")).into_response()
+  (StatusCode::NOT_FOUND, format!("not found: {uri}")).into_response()
 }

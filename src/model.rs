@@ -239,9 +239,17 @@ impl fmt::Display for YearMonth {
   }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("invalid month \"{0}\", expected format YYYY-MM")]
+/// A month that is not `YYYY-MM`; its message follows the request's language.
+#[derive(Debug)]
 pub struct ParseYearMonthError(String);
+
+impl fmt::Display for ParseYearMonthError {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.write_str(&tr!("month “{raw}” not understood — expected YYYY-MM", raw = self.0))
+  }
+}
+
+impl std::error::Error for ParseYearMonthError {}
 
 impl FromStr for YearMonth {
   type Err = ParseYearMonthError;
@@ -310,7 +318,7 @@ pub mod opt_hhmm {
         return Ok(t);
       }
     }
-    Err(format!("invalid time \"{s}\", expected format HH:MM"))
+    Err(tr!("time “{raw}” not understood — expected HH:MM", raw = s))
   }
 }
 

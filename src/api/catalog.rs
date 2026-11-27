@@ -1,19 +1,19 @@
-//! Gestion des trois listes : projets SageX, activités SageX, tâches.
+//! The three lists: SageX projects, SageX activities, tasks.
 
 use crate::api::{ApiError, ApiResult};
-use crate::app::AppState;
+use crate::app::Space;
 use crate::model::{Activity, Catalog, Preset, Project};
 use crate::parse;
 use crate::slug;
 use crate::store::Change;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, Query};
 use axum::Json;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::collections::HashSet;
 
-pub async fn get_catalog(State(state): State<AppState>) -> ApiResult<Json<Catalog>> {
-  Ok(Json(state.store.catalog()?))
+pub async fn get_catalog(space: Space) -> ApiResult<Json<Catalog>> {
+  Ok(Json(space.store.catalog()?))
 }
 
 #[derive(Debug, Deserialize)]
@@ -22,7 +22,7 @@ pub struct ItemInput {
   pub id: Option<String>,
   #[serde(default)]
   pub name: Option<String>,
-  /// Les tâches utilisent `label`, les projets et activités `name`.
+  /// Tasks use `label`, projects and activities `name`.
   #[serde(default)]
   pub label: Option<String>,
   #[serde(default, alias = "number")]
@@ -51,13 +51,9 @@ impl ItemInput {
   }
 }
 
-pub async fn create_item(
-  State(state): State<AppState>,
-  Path(kind): Path<String>,
-  Json(input): Json<ItemInput>,
-) -> ApiResult<Json<Value>> {
-  let _guard = state.write_lock.lock().await;
-  let mut catalog = state.store.catalog()?;
+pub async fn create_item(space: Space, Path(kind): Path<String>, Json(input): Json<ItemInput>) -> ApiResult<Json<Value>> {
+  let _guard = space.write_lock.lock().await;
+  let mut catalog = space.store.catalog()?;
 
   let created = match kind.as_str() {
     "projects" => {
@@ -90,8 +86,8 @@ pub async fn create_item(
     }
     "presets" => {
       let label = require_title(&input, "label")?;
-      let project = input.project.as_ref().ok_or_else(|| ApiError::bad_request("`project` manquant"))?;
-      let activity = input.activity.as_ref().ok_or_else(|| ApiError::bad_request("`activity` manquant"))?;
+      let project = input.project.as_ref().ok_or_else(|| ApiError::bad_request(tr!("`{field}` missing", field = "project")))?;
+      let activity = input.activity.as_ref().ok_or_else(|| ApiError::bad_request(tr!("`{field}` missing", field = "activity")))?;
       let project_id = parse::find_project(&catalog, &project.as_text()).into_result().map_err(ApiError::bad_request)?.id.clone();
       let activity_id =
         parse::find_activity(&catalog, &activity.as_text()).into_result().map_err(ApiError::bad_request)?.id.clone();
@@ -113,19 +109,19 @@ pub async fn create_item(
     other => return Err(unknown_kind(other)),
   };
 
-  save(&state, &catalog)?;
+  save(&space, &catalog)?;
   Ok(Json(created))
 }
 
 pub async fn update_item(
-  State(state): State<AppState>,
+  space: Space,
   Path((kind, id)): Path<(String, String)>,
   Json(input): Json<ItemInput>,
 ) -> ApiResult<Json<Value>> {
-  let _guard = state.write_lock.lock().await;
-  let mut catalog = state.store.catalog()?;
+  let _guard = space.write_lock.lock().await;
+  let mut catalog = space.store.catalog()?;
 
-  // Les références sont résolues avant l'emprunt mutable de la liste visée.
+  // References are resolved before the target list is borrowed mutably.
   let project_id = match &input.project {
     Some(reference) => Some(parse::find_project(&catalog, &reference.as_text()).into_result().map_err(ApiError::bad_request)?.id.clone()),
     None => None,
@@ -202,31 +198,33 @@ pub async fn update_item(
     other => return Err(unknown_kind(other)),
   };
 
-  save(&state, &catalog)?;
+  save(&space, &catalog)?;
   Ok(Json(updated))
 }
 
 #[derive(Debug, Deserialize)]
 pub struct DeleteQuery {
-  /// Supprime même si des saisies utilisent l'élément (elles deviennent orphelines).
+  /// Deletes even if entries use the item (they become orphans).
   #[serde(default)]
   pub force: Option<bool>,
 }
 
 pub async fn delete_item(
-  State(state): State<AppState>,
+  space: Space,
   Path((kind, id)): Path<(String, String)>,
   Query(query): Query<DeleteQuery>,
 ) -> ApiResult<Json<Value>> {
-  let _guard = state.write_lock.lock().await;
-  let mut catalog = state.store.catalog()?;
+  let _guard = space.write_lock.lock().await;
+  let mut catalog = space.store.catalog()?;
 
-  // Un projet ou une activité encore utilisé ne disparaît pas en silence.
+  // A project or an activity still in use does not vanish silently.
   if kind != "presets" && !query.force.unwrap_or(false) {
-    let used = count_usages(&state, &kind, &id)?;
+    let used = count_usages(&space, &kind, &id)?;
     if used > 0 {
-      return Err(ApiError::conflict(format!(
-        "{used} saisie(s) utilisent encore « {id} » — archive-le, ou relance avec ?force=true"
+      return Err(ApiError::conflict(tr!(
+        "{count} entries still use “{id}” — archive it, or retry with ?force=true",
+        count = used,
+        id = id
       )));
     }
   }
@@ -241,16 +239,16 @@ pub async fn delete_item(
     return Err(missing(&kind, &id));
   }
 
-  save(&state, &catalog)?;
+  save(&space, &catalog)?;
   Ok(Json(json!({ "deleted": id })))
 }
 
 // ---------------------------------------------------------------------------
 
-fn save(state: &AppState, catalog: &Catalog) -> ApiResult<()> {
-  state.store.save_catalog(catalog)?;
-  state.mark_self_write();
-  state.store.notify(Change::scope("catalog"));
+fn save(space: &Space, catalog: &Catalog) -> ApiResult<()> {
+  space.store.save_catalog(catalog)?;
+  space.mark_self_write();
+  space.store.notify(Change::scope("catalog"));
   Ok(())
 }
 
@@ -264,10 +262,10 @@ fn remove_by_id<T>(items: &mut Vec<T>, id: &str, id_of: impl Fn(&T) -> &str) -> 
   }
 }
 
-fn count_usages(state: &AppState, kind: &str, id: &str) -> ApiResult<usize> {
+fn count_usages(space: &Space, kind: &str, id: &str) -> ApiResult<usize> {
   let mut count = 0;
-  for month in state.store.months()? {
-    for entry in state.store.month(month)?.entries {
+  for month in space.store.months()? {
+    for entry in space.store.month(month)?.entries {
       let hit = match kind {
         "projects" => entry.project_id == id,
         "activities" => entry.activity_id == id,
@@ -284,7 +282,7 @@ fn count_usages(state: &AppState, kind: &str, id: &str) -> ApiResult<usize> {
 fn require_title(input: &ItemInput, field: &str) -> ApiResult<String> {
   match input.title().map(str::trim).filter(|t| !t.is_empty()) {
     Some(title) => Ok(title.to_string()),
-    None => Err(ApiError::bad_request(format!("`{field}` manquant"))),
+    None => Err(ApiError::bad_request(tr!("`{field}` missing", field = field))),
   }
 }
 
@@ -297,23 +295,23 @@ fn taken(ids: impl Iterator<Item = String>) -> HashSet<String> {
   ids.collect()
 }
 
-/// Deux éléments portant le même numéro SageX sont presque toujours une erreur.
+/// Two items with the same SageX number are almost always a mistake.
 fn warn_duplicate_number<'a>(existing: impl Iterator<Item = (u32, &'a str)>, number: u32) -> ApiResult<()> {
   if number == 0 {
     return Ok(());
   }
   for (other_number, name) in existing {
     if other_number == number {
-      return Err(ApiError::conflict(format!("le numéro SageX {number} est déjà utilisé par « {name} »")));
+      return Err(ApiError::conflict(tr!("SageX number {number} is already used by “{name}”", number = number, name = name)));
     }
   }
   Ok(())
 }
 
 fn missing(kind: &str, id: &str) -> ApiError {
-  ApiError::not_found(format!("aucun élément « {id} » dans {kind}"))
+  ApiError::not_found(tr!("no item “{id}” in {kind}", id = id, kind = kind))
 }
 
 fn unknown_kind(kind: &str) -> ApiError {
-  ApiError::bad_request(format!("liste « {kind} » inconnue — utilise projects, activities ou presets"))
+  ApiError::bad_request(tr!("unknown list “{kind}” — use projects, activities or presets", kind = kind))
 }

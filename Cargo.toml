@@ -2,13 +2,14 @@
 name = "sagex-hours"
 version = "0.1.0"
 edition = "2021"
-description = "Saisie des heures SageX : base JSON en clair, API HTTP, UI web, export xlsx"
+description = "SageX hours: a plain JSON base, an HTTP API and MCP endpoint, a web interface, the xlsx export"
 
 [dependencies]
 anyhow = "1"
 axum = { version = "0.8", features = ["macros"] }
 chrono = { version = "0.4", features = ["serde"] }
 futures-core = "0.3"
+getrandom = "0.3"
 clap = { version = "4", features = ["derive", "env"] }
 mime_guess = "2"
 notify = "8"
@@ -19,9 +20,10 @@ rust-embed = "8"
 rust_xlsxwriter = "0.89"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-thiserror = "2"
+sha2 = "0.11"
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time", "fs"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
+tower = { version = "0.5", features = ["util"] }
 tower-http = { version = "0.6", features = ["trace"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }

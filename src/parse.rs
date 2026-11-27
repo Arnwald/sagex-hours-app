@@ -1,13 +1,13 @@
-//! Entrées « tolérantes » : durées écrites à la main et références au catalogue
-//! désignées par identifiant, numéro SageX ou nom.
+//! Lenient input: durations written by hand, and references to the catalogue by
+//! identifier, SageX number or name.
 //!
-//! C'est ce qui permet d'écrire `{"project": "Subice", "duration": "4h30"}`
-//! plutôt que de connaître les identifiants par cœur.
+//! This is what lets one write `{"project": "Subice", "duration": "4h30"}`
+//! without knowing the identifiers by heart.
 
 use crate::model::{Activity, Catalog, Preset, Project};
 use serde::Deserialize;
 
-/// Une valeur JSON qui peut être un nombre ou une chaîne.
+/// A JSON value that may be a number or a string.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum Loose {
@@ -27,15 +27,15 @@ impl Loose {
 
 /// `"1h30"`, `"1:30"`, `"90"`, `"90m"`, `"1.5h"`, `"1,5h"` → 90 minutes.
 ///
-/// Un nombre nu est interprété en minutes ; utiliser `hours` pour des heures.
+/// A bare number means minutes; use `hours` for hours.
 pub fn parse_minutes(input: &str) -> Result<u32, String> {
   let raw = input.trim().to_lowercase().replace(',', ".");
   if raw.is_empty() {
-    return Err("durée vide".to_string());
+    return Err(tr!("empty duration"));
   }
 
-  // Chaque règle est essayée dans l'ordre ; une règle qui ne s'applique pas
-  // laisse la main à la suivante plutôt que d'échouer (« 1h30min » doit passer).
+  // Each rule is tried in turn; a rule that does not apply hands over to the
+  // next instead of failing ("1h30min" must pass).
   if let Some(hours) = suffixed(&raw, &["heures", "heure", "hours", "hour"]) {
     return finish(hours * 60.0, input);
   }
@@ -60,7 +60,7 @@ pub fn parse_minutes(input: &str) -> Result<u32, String> {
   }
 }
 
-/// Valeur numérique précédant l'un des suffixes, si elle est exploitable.
+/// The number before one of the suffixes, if it is one.
 fn suffixed(raw: &str, suffixes: &[&str]) -> Option<f64> {
   for suffix in suffixes {
     if let Some(value) = raw.strip_suffix(suffix) {
@@ -72,7 +72,7 @@ fn suffixed(raw: &str, suffixes: &[&str]) -> Option<f64> {
   None
 }
 
-/// `""` vaut 0 ; toute autre valeur doit être un nombre.
+/// `""` is 0; anything else must be a number.
 fn parse_or_zero(part: &str) -> Option<f64> {
   let part = part.trim();
   if part.is_empty() {
@@ -87,16 +87,16 @@ fn finish(minutes: f64, input: &str) -> Result<u32, String> {
     return Err(bad(input));
   }
   if minutes > 24.0 * 60.0 {
-    return Err(format!("durée « {input} » supérieure à 24 h"));
+    return Err(tr!("duration “{input}” is over 24 h", input = input));
   }
   Ok(minutes.round() as u32)
 }
 
 fn bad(input: &str) -> String {
-  format!("durée « {input} » incomprise — exemples : 1h30, 1:30, 90, 90min, 1.5h")
+  tr!("duration “{input}” not understood — examples: 1h30, 1:30, 90, 90min, 1.5h", input = input)
 }
 
-/// Résultat d'une recherche dans une des listes du catalogue.
+/// The result of a search in one of the catalogue's lists.
 pub enum Lookup<T> {
   Found(T),
   NotFound(String),
@@ -112,8 +112,8 @@ impl<T> Lookup<T> {
   }
 }
 
-/// Recherche générique : identifiant exact, puis numéro SageX, puis nom exact,
-/// puis nom insensible à la casse, puis préfixe unique.
+/// Generic search: exact identifier, then SageX number, then exact name, then
+/// case-insensitive name, then a single partial match.
 fn lookup<'a, T>(
   items: &'a [T],
   needle: &str,
@@ -124,7 +124,7 @@ fn lookup<'a, T>(
 ) -> Lookup<&'a T> {
   let needle = needle.trim();
   if needle.is_empty() {
-    return Lookup::NotFound(format!("{kind} non précisé"));
+    return Lookup::NotFound(tr!("{kind} not given", kind = kind));
   }
   if let Some(found) = items.iter().find(|i| id_of(i) == needle) {
     return Lookup::Found(found);
@@ -150,24 +150,26 @@ fn lookup<'a, T>(
     .collect();
   match partial.len() {
     1 => Lookup::Found(partial[0]),
-    0 => Lookup::NotFound(format!("{kind} « {needle} » introuvable")),
-    _ => Lookup::Ambiguous(format!(
-      "{kind} « {needle} » ambigu — candidats : {}",
-      partial.iter().map(|i| id_of(i)).collect::<Vec<_>>().join(", ")
+    0 => Lookup::NotFound(tr!("{kind} “{needle}” not found", kind = kind, needle = needle)),
+    _ => Lookup::Ambiguous(tr!(
+      "{kind} “{needle}” is ambiguous — candidates: {candidates}",
+      kind = kind,
+      needle = needle,
+      candidates = partial.iter().map(|i| id_of(i)).collect::<Vec<_>>().join(", ")
     )),
   }
 }
 
 pub fn find_project<'a>(catalog: &'a Catalog, needle: &str) -> Lookup<&'a Project> {
-  lookup(&catalog.projects, needle, "projet", |p| &p.id, |p| Some(p.sagex_number), |p| &p.name)
+  lookup(&catalog.projects, needle, &tr!("project"), |p| &p.id, |p| Some(p.sagex_number), |p| &p.name)
 }
 
 pub fn find_activity<'a>(catalog: &'a Catalog, needle: &str) -> Lookup<&'a Activity> {
-  lookup(&catalog.activities, needle, "activité", |a| &a.id, |a| Some(a.sagex_number), |a| &a.name)
+  lookup(&catalog.activities, needle, &tr!("activity"), |a| &a.id, |a| Some(a.sagex_number), |a| &a.name)
 }
 
 pub fn find_preset<'a>(catalog: &'a Catalog, needle: &str) -> Lookup<&'a Preset> {
-  lookup(&catalog.presets, needle, "tâche", |p| &p.id, |_| None, |p| &p.label)
+  lookup(&catalog.presets, needle, &tr!("task"), |p| &p.id, |_| None, |p| &p.label)
 }
 
 #[cfg(test)]
@@ -194,14 +196,14 @@ mod tests {
       ("45 minutes", 45),
       ("h30", 30),
     ] {
-      assert_eq!(parse_minutes(input), Ok(expected), "pour « {input} »");
+      assert_eq!(parse_minutes(input), Ok(expected), "for {input:?}");
     }
   }
 
   #[test]
   fn nonsense_durations_are_rejected_with_help() {
     assert!(parse_minutes("").is_err());
-    assert!(parse_minutes("hier").unwrap_err().contains("exemples"));
+    assert!(parse_minutes("yesterday").unwrap_err().contains("examples"));
     assert!(parse_minutes("-3h").is_err());
     assert!(parse_minutes("30h").unwrap_err().contains("24"));
   }
@@ -261,9 +263,9 @@ mod tests {
   fn unknown_and_ambiguous_references_explain_themselves() {
     let c = catalog();
     let err = find_project(&c, "Steiger").into_result().unwrap_err();
-    assert!(err.contains("introuvable"), "{err}");
+    assert!(err.contains("not found"), "{err}");
 
     let err = find_activity(&c, "a").into_result().unwrap_err();
-    assert!(err.contains("ambigu") && err.contains("seance"), "{err}");
+    assert!(err.contains("ambiguous") && err.contains("seance"), "{err}");
   }
 }

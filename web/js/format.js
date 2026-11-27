@@ -1,30 +1,28 @@
-// Formats partagés par les deux fenêtres.
+// Formats shared by both windows. Day and month names live in i18n.js.
 
-export const DAY_NAMES = ['lun', 'mar', 'mer', 'jeu', 'ven', 'sam', 'dim'];
-export const MONTH_NAMES = ['janvier', 'février', 'mars', 'avril', 'mai', 'juin',
-  'juillet', 'août', 'septembre', 'octobre', 'novembre', 'décembre'];
+import { dayShort, monthShort } from './i18n.js';
 
-/** 90 → « 1h30 ». */
+/** 90 → "1h30". */
 export function hhmm(minutes) {
   const sign = minutes < 0 ? '−' : '';
   const value = Math.abs(Math.round(minutes));
   return `${sign}${Math.floor(value / 60)}h${String(value % 60).padStart(2, '0')}`;
 }
 
-/** « 08:30 » → 510. */
+/** "08:30" → 510. */
 export function toMinutes(time) {
   if (!time) return null;
   const [h, m] = time.split(':').map(Number);
   return h * 60 + (m || 0);
 }
 
-/** 510 → « 08:30 ». */
+/** 510 → "08:30". */
 export function toTime(minutes) {
   const value = Math.max(0, Math.min(24 * 60 - 1, Math.round(minutes)));
   return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
 }
 
-/** Date locale au format ISO, sans décalage de fuseau. */
+/** Local date in ISO format, with no time-zone shift. */
 export function iso(date) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 }
@@ -51,9 +49,9 @@ export function sameMonth(a, b) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth();
 }
 
-/** « lun 14 sept. ». */
+/** "lun 14 sept.", "Mon 14 Sept". */
 export function longDay(date) {
-  return `${DAY_NAMES[(date.getDay() + 6) % 7]} ${date.getDate()} ${MONTH_NAMES[date.getMonth()].slice(0, 4)}.`;
+  return `${dayShort(date)} ${date.getDate()} ${monthShort(date.getMonth())}`;
 }
 
 export function escapeHtml(text) {
@@ -61,7 +59,7 @@ export function escapeHtml(text) {
     ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 }
 
-/** Couleur de texte lisible sur un fond donné. */
+/** Text colour readable on a given background. */
 export function readableOn(hex) {
   const value = (hex || '#666').replace('#', '');
   const full = value.length === 3 ? value.split('').map((c) => c + c).join('') : value;

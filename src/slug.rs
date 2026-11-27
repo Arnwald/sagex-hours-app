@@ -1,10 +1,10 @@
-//! Fabrication d'identifiants lisibles pour le catalogue.
+//! Builds readable identifiers for the catalog.
 //!
-//! Les identifiants apparaissent dans le JSON et dans les requêtes que Claude
-//! écrit : ils doivent rester courts, sans accent, et reconnaissables.
+//! Identifiers appear in the JSON and in the requests Claude writes: they must
+//! stay short, unaccented and recognisable.
 
-/// Mots vides retirés uniquement si le slug dépasse la longueur cible.
-/// Aucun mot d'une lettre ici : « Ra&D » doit rester « ra-d ».
+/// Stop words, removed only when the slug exceeds the target length.
+/// No one-letter words here: "Ra&D" must stay "ra-d".
 const STOPWORDS: &[&str] = &["de", "des", "du", "la", "le", "les", "un", "une", "ou", "et", "au", "aux", "en", "pour", "sur"];
 
 const MAX_LEN: usize = 36;
@@ -23,7 +23,7 @@ pub fn slugify(input: &str) -> String {
     return fallback(full);
   }
 
-  // Trop long : on retire les mots vides, puis on tronque sur une frontière de mot.
+  // Too long: drop the stop words, then truncate on a word boundary.
   let trimmed: Vec<String> = words.iter().filter(|w| !STOPWORDS.contains(&w.as_str())).cloned().collect();
   let trimmed = if trimmed.is_empty() { words } else { trimmed };
 
@@ -50,7 +50,7 @@ fn fallback(s: String) -> String {
   }
 }
 
-/// Rend `slug` unique vis-à-vis de `taken`, en suffixant si nécessaire.
+/// Makes `slug` unique with respect to `taken`, adding a suffix if needed.
 pub fn unique(slug: &str, taken: &mut std::collections::HashSet<String>, hint: Option<u32>) -> String {
   if taken.insert(slug.to_string()) {
     return slug.to_string();
@@ -70,8 +70,8 @@ pub fn unique(slug: &str, taken: &mut std::collections::HashSet<String>, hint: O
   unreachable!()
 }
 
-/// Supprime les élisions françaises : `d'activités` → `activités`, sans toucher
-/// aux lettres isolées qui portent du sens (`Ra&D`).
+/// Removes French elisions (`d'activités` → `activités`) without touching
+/// standalone letters that carry meaning (`Ra&D`).
 fn strip_elisions(input: &str) -> String {
   let mut out = String::with_capacity(input.len());
   let mut word = String::new();
@@ -97,7 +97,7 @@ fn strip_elisions(input: &str) -> String {
   out
 }
 
-/// Translittération ASCII suffisante pour du français et de l'allemand.
+/// ASCII transliteration, good enough for French and German.
 fn deaccent(input: &str) -> String {
   input
     .chars()

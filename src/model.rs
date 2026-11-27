@@ -1,8 +1,8 @@
-//! Modèle de données de la base « en clair ».
+//! Data model of the plain-text database.
 //!
-//! Trois listes indépendantes (projets SageX, activités SageX, presets de saisie)
-//! et des entrées regroupées par mois. Tous les types sont pensés pour donner un
-//! JSON lisible et éditable à la main.
+//! Three independent lists (SageX projects, SageX activities, entry presets)
+//! and entries grouped by month. Every type is designed to give JSON that is
+//! readable and editable by hand.
 
 use chrono::{Datelike, Local, NaiveDate, NaiveDateTime, NaiveTime};
 use serde::{Deserialize, Serialize};
@@ -12,29 +12,29 @@ use std::str::FromStr;
 pub type Id = String;
 
 // ---------------------------------------------------------------------------
-// Catalogue
+// Catalog
 // ---------------------------------------------------------------------------
 
-/// Un projet SageX : le « N° projet Hesso » et son libellé.
+/// A SageX project: its "N° projet Hesso" and its label.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Project {
   pub id: Id,
-  /// N° SageX. 0 est accepté pour un projet purement interne (voir `exportable`).
+  /// SageX number. 0 is accepted for a purely internal project (see `exportable`).
   pub sagex_number: u32,
   pub name: String,
   #[serde(default = "default_color")]
   pub color: String,
   #[serde(default)]
   pub archived: bool,
-  /// `false` pour les projets qui restent dans l'app mais ne partent pas dans SageX
-  /// (vacances, compensation, jours fériés).
+  /// `false` for projects that stay in the app but never go to SageX
+  /// (holidays, time off in lieu, public holidays).
   #[serde(default = "default_true")]
   pub exportable: bool,
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub note: Option<String>,
 }
 
-/// Une activité SageX. Liste unique, utilisable par n'importe quel projet.
+/// A SageX activity. A single list, usable by any project.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Activity {
   pub id: Id,
@@ -46,20 +46,20 @@ pub struct Activity {
   pub note: Option<String>,
 }
 
-/// Raccourci de saisie : le couple (projet, activité) que l'on utilise souvent,
-/// sous un nom court. Sert aussi de table de correspondance pour l'import Toggl.
+/// Entry shortcut: a frequently used (project, activity) pair under a short
+/// name. Also serves as the mapping table for the Toggl import.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Preset {
   pub id: Id,
   pub label: String,
   pub project_id: Id,
   pub activity_id: Id,
-  /// Commentaire pré-rempli lors de la création d'une entrée.
+  /// Comment pre-filled when an entry is created.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub comment: Option<String>,
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub color: Option<String>,
-  /// Couple (client, projet) Toggl correspondant, pour l'import de l'historique.
+  /// Matching Toggl (client, project) pair, for importing the history.
   #[serde(default, skip_serializing_if = "Option::is_none")]
   pub toggl: Option<TogglRef>,
   #[serde(default)]
@@ -98,7 +98,7 @@ impl Catalog {
 }
 
 // ---------------------------------------------------------------------------
-// Entrées
+// Entries
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -117,8 +117,8 @@ impl Default for Source {
   }
 }
 
-/// Une saisie. `start`/`end` sont facultatifs : une entrée sans horaire reste
-/// valide et s'affiche dans la bande « sans horaire » de la journée.
+/// A time entry. `start`/`end` are optional: an entry without times is still
+/// valid and shows in the day's "no time" band.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Entry {
   pub id: Id,
@@ -127,7 +127,7 @@ pub struct Entry {
   pub start: Option<NaiveTime>,
   #[serde(default, skip_serializing_if = "Option::is_none", with = "opt_hhmm")]
   pub end: Option<NaiveTime>,
-  /// Durée en minutes. Fait foi, même quand start/end sont renseignés.
+  /// Duration in minutes. Authoritative, even when start/end are set.
   pub minutes: u32,
   pub project_id: Id,
   pub activity_id: Id,
@@ -150,7 +150,7 @@ impl Entry {
     Local::now().naive_local().with_nanosecond(0).unwrap_or_else(|| Local::now().naive_local())
   }
 
-  /// Heure de fin effective, déduite de la durée si `end` est absent.
+  /// Effective end time, derived from the duration when `end` is missing.
   pub fn effective_end(&self) -> Option<NaiveTime> {
     match (self.start, self.end) {
       (_, Some(e)) => Some(e),
@@ -160,7 +160,7 @@ impl Entry {
   }
 }
 
-/// Contenu d'un fichier `entries/YYYY-MM.json`.
+/// Contents of an `entries/YYYY-MM.json` file.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MonthFile {
   pub month: YearMonth,
@@ -174,7 +174,7 @@ impl MonthFile {
   }
 }
 
-/// Chronomètre en cours (`timer.json`).
+/// Running timer (`timer.json`).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunningTimer {
   pub project_id: Id,
@@ -188,7 +188,7 @@ pub struct RunningTimer {
 // YearMonth
 // ---------------------------------------------------------------------------
 
-/// Un mois calendaire, sérialisé `"YYYY-MM"`.
+/// A calendar month, serialised as `"YYYY-MM"`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct YearMonth {
   pub year: i32,
@@ -201,11 +201,11 @@ impl YearMonth {
   }
 
   pub fn first_day(&self) -> NaiveDate {
-    NaiveDate::from_ymd_opt(self.year, self.month, 1).expect("mois valide")
+    NaiveDate::from_ymd_opt(self.year, self.month, 1).expect("valid month")
   }
 
   pub fn last_day(&self) -> NaiveDate {
-    self.next().first_day().pred_opt().expect("date valide")
+    self.next().first_day().pred_opt().expect("valid date")
   }
 
   pub fn next(&self) -> Self {
@@ -220,7 +220,7 @@ impl YearMonth {
     date.year() == self.year && date.month() == self.month
   }
 
-  /// Tous les mois de `from` à `to` inclus.
+  /// Every month from `from` to `to` inclusive.
   pub fn range(from: NaiveDate, to: NaiveDate) -> Vec<YearMonth> {
     let mut out = Vec::new();
     let mut cur = YearMonth::of(from);
@@ -239,9 +239,17 @@ impl fmt::Display for YearMonth {
   }
 }
 
-#[derive(Debug, thiserror::Error)]
-#[error("mois invalide « {0} », format attendu YYYY-MM")]
+/// A month that is not `YYYY-MM`; its message follows the request's language.
+#[derive(Debug)]
 pub struct ParseYearMonthError(String);
+
+impl fmt::Display for ParseYearMonthError {
+  fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+    f.write_str(&tr!("month “{raw}” not understood — expected YYYY-MM", raw = self.0))
+  }
+}
+
+impl std::error::Error for ParseYearMonthError {}
 
 impl FromStr for YearMonth {
   type Err = ParseYearMonthError;
@@ -271,7 +279,7 @@ impl<'de> Deserialize<'de> for YearMonth {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers de sérialisation
+// Serialisation helpers
 // ---------------------------------------------------------------------------
 
 fn default_color() -> String {
@@ -282,7 +290,7 @@ fn default_true() -> bool {
   true
 }
 
-/// Heures au format `"HH:MM"` (et non `HH:MM:SS`), tolérant en lecture.
+/// Times as `"HH:MM"` (not `HH:MM:SS`), lenient when reading.
 pub mod opt_hhmm {
   use chrono::NaiveTime;
   use serde::{Deserialize, Deserializer, Serializer};
@@ -310,7 +318,7 @@ pub mod opt_hhmm {
         return Ok(t);
       }
     }
-    Err(format!("heure invalide « {s} », format attendu HH:MM"))
+    Err(tr!("time “{raw}” not understood — expected HH:MM", raw = s))
   }
 }
 
@@ -360,7 +368,7 @@ mod tests {
     };
     let json = serde_json::to_string(&entry).unwrap();
     assert!(json.contains("\"start\":\"08:30\""), "{json}");
-    assert!(!json.contains("\"end\""), "end absent quand None: {json}");
+    assert!(!json.contains("\"end\""), "end absent when None: {json}");
 
     let back: Entry = serde_json::from_str(&json).unwrap();
     assert_eq!(back.start, entry.start);

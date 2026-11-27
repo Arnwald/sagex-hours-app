@@ -1,26 +1,26 @@
-//! Saisies : lecture, création (unitaire ou en masse), modification,
-//! duplication de jours ou de semaines, chronomètre.
+//! Entries: reading, creating (one or many), editing, copying days or weeks,
+//! and the timer.
 
 use crate::api::{ApiError, ApiResult};
-use crate::app::AppState;
+use crate::app::{Caller, Space};
 use crate::model::{opt_hhmm, Entry, RunningTimer, Source, YearMonth};
 use crate::parse::{self, Loose};
 use crate::settings::Settings;
 use crate::store::Change;
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, Query};
 use axum::Json;
 use chrono::{Datelike, Duration, Local, NaiveDate, NaiveTime, Weekday};
 use serde::{Deserialize, Deserializer};
 use serde_json::{json, Value};
 
 // ---------------------------------------------------------------------------
-// Entrées de requête
+// Request bodies
 // ---------------------------------------------------------------------------
 
-/// Description d'une saisie telle qu'on peut l'écrire à la main.
+/// An entry as one would write it by hand.
 ///
-/// Les références acceptent l'identifiant, le numéro SageX ou le nom ; la durée
-/// accepte `1h30`, `90`, `1.5h`… Les alias couvrent les formulations naturelles
+/// References accept the identifier, the SageX number or the name; the duration
+/// accepts `1h30`, `90`, `1.5h`… Aliases cover the natural spellings
 /// (`project_id`, `description`, `remarque`).
 #[derive(Debug, Default, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -53,7 +53,7 @@ pub struct EntryInput {
   pub toggl_id: Option<i64>,
 }
 
-/// Une ou plusieurs saisies.
+/// One entry or several.
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 pub enum EntryPayload {
@@ -61,7 +61,7 @@ pub enum EntryPayload {
   Many(Vec<EntryInput>),
 }
 
-/// `null` explicite vs champ absent (pour effacer un horaire avec PATCH).
+/// An explicit `null` vs a missing field (to clear a time with PATCH).
 fn double_option<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
 where
   D: Deserializer<'de>,
@@ -77,7 +77,7 @@ pub struct RangeQuery {
 }
 
 impl RangeQuery {
-  /// Par défaut : la semaine en cours.
+  /// By default, the current week.
   fn resolve(&self) -> ApiResult<(NaiveDate, NaiveDate)> {
     let today = Local::now().date_naive();
     let from = match &self.from {
@@ -89,23 +89,23 @@ impl RangeQuery {
       None => from + Duration::days(6),
     };
     if to < from {
-      return Err(ApiError::bad_request("l'intervalle se termine avant de commencer"));
+      return Err(ApiError::bad_request(tr!("the range ends before it starts")));
     }
     Ok((from, to))
   }
 }
 
 // ---------------------------------------------------------------------------
-// Lecture
+// Reading
 // ---------------------------------------------------------------------------
 
-/// Tout ce dont l'interface a besoin pour afficher une période.
-pub async fn state(State(state): State<AppState>, Query(range): Query<RangeQuery>) -> ApiResult<Json<Value>> {
+/// Everything the interface needs to show a period.
+pub async fn state(caller: Caller, Query(range): Query<RangeQuery>) -> ApiResult<Json<Value>> {
   let (from, to) = range.resolve()?;
-  let store = &state.store;
+  let store = &caller.space.store;
   let settings = store.settings()?;
 
-  // Fériés de la période, pour marquer les colonnes de la semaine.
+  // The period's holidays, to mark the week's columns.
   let mut holidays = Vec::new();
   for year in from.year()..=to.year() {
     for (date, name) in crate::validate::holidays(year, &settings) {
@@ -124,28 +124,29 @@ pub async fn state(State(state): State<AppState>, Query(range): Query<RangeQuery
     "entries": store.entries_between(from, to)?,
     "timer": store.timer()?,
     "months": store.months()?.iter().map(|m| m.to_string()).collect::<Vec<_>>(),
-    "auth_required": state.auth_token.is_some(),
+    "me": caller.info(),
   })))
 }
 
-pub async fn list(State(state): State<AppState>, Query(range): Query<RangeQuery>) -> ApiResult<Json<Vec<Entry>>> {
+pub async fn list(space: Space, Query(range): Query<RangeQuery>) -> ApiResult<Json<Vec<Entry>>> {
   let (from, to) = range.resolve()?;
-  Ok(Json(state.store.entries_between(from, to)?))
+  Ok(Json(space.store.entries_between(from, to)?))
 }
 
-pub async fn get_settings(State(state): State<AppState>) -> ApiResult<Json<Settings>> {
-  Ok(Json(state.store.settings()?))
+pub async fn get_settings(space: Space) -> ApiResult<Json<Settings>> {
+  Ok(Json(space.store.settings()?))
 }
 
-/// Fusion partielle : seuls les champs fournis sont modifiés.
-pub async fn patch_settings(State(state): State<AppState>, Json(patch): Json<Value>) -> ApiResult<Json<Settings>> {
-  let _guard = state.write_lock.lock().await;
-  let current = serde_json::to_value(state.store.settings()?).map_err(anyhow::Error::from)?;
+/// Partial merge: only the fields given change.
+pub async fn patch_settings(space: Space, Json(patch): Json<Value>) -> ApiResult<Json<Settings>> {
+  let _guard = space.write_lock.lock().await;
+  let current = serde_json::to_value(space.store.settings()?).map_err(anyhow::Error::from)?;
   let merged = merge(current, patch);
-  let settings: Settings = serde_json::from_value(merged).map_err(|e| ApiError::bad_request(format!("réglages invalides : {e}")))?;
-  state.store.save_settings(&settings)?;
-  state.mark_self_write();
-  state.store.notify(Change::scope("settings"));
+  let settings: Settings =
+    serde_json::from_value(merged).map_err(|e| ApiError::bad_request(tr!("invalid settings: {error}", error = e)))?;
+  space.store.save_settings(&settings)?;
+  space.mark_self_write();
+  space.store.notify(Change::scope("settings"));
   Ok(Json(settings))
 }
 
@@ -163,82 +164,78 @@ fn merge(mut base: Value, patch: Value) -> Value {
 }
 
 // ---------------------------------------------------------------------------
-// Écriture
+// Writing
 // ---------------------------------------------------------------------------
 
-pub async fn create(State(state): State<AppState>, Json(payload): Json<EntryPayload>) -> ApiResult<Json<Value>> {
+pub async fn create(space: Space, Json(payload): Json<EntryPayload>) -> ApiResult<Json<Value>> {
   let inputs = match payload {
     EntryPayload::One(one) => vec![*one],
     EntryPayload::Many(many) => many,
   };
   if inputs.is_empty() {
-    return Err(ApiError::bad_request("aucune saisie fournie"));
+    return Err(ApiError::bad_request(tr!("no entry given")));
   }
 
-  let _guard = state.write_lock.lock().await;
-  let catalog = state.store.catalog()?;
+  let _guard = space.write_lock.lock().await;
+  let catalog = space.store.catalog()?;
   let mut entries = Vec::with_capacity(inputs.len());
   for (index, input) in inputs.into_iter().enumerate() {
-    entries.push(build_entry(&catalog, input).map_err(|e| ApiError::bad_request(format!("saisie {} : {e}", index + 1)))?);
+    entries.push(build_entry(&catalog, input).map_err(|e| ApiError::bad_request(tr!("entry {n}: {error}", n = index + 1, error = e)))?);
   }
-  let created = state.store.insert_entries(entries)?;
-  state.mark_self_write();
+  let created = space.store.insert_entries(entries)?;
+  space.mark_self_write();
   Ok(Json(json!({ "created": created.len(), "entries": created })))
 }
 
-pub async fn update(
-  State(state): State<AppState>,
-  Path(id): Path<String>,
-  Json(input): Json<EntryInput>,
-) -> ApiResult<Json<Entry>> {
-  let _guard = state.write_lock.lock().await;
-  let catalog = state.store.catalog()?;
-  let Some((month, mut entry)) = state.store.find_entry(&id)? else {
-    return Err(ApiError::not_found(format!("saisie « {id} » introuvable")));
+pub async fn update(space: Space, Path(id): Path<String>, Json(input): Json<EntryInput>) -> ApiResult<Json<Entry>> {
+  let _guard = space.write_lock.lock().await;
+  let catalog = space.store.catalog()?;
+  let Some((month, mut entry)) = space.store.find_entry(&id)? else {
+    return Err(ApiError::not_found(tr!("entry “{id}” not found", id = id)));
   };
   apply_input(&catalog, &mut entry, input).map_err(ApiError::bad_request)?;
   entry.updated_at = Entry::now();
-  state.store.replace_entry(month, entry.clone())?;
-  state.mark_self_write();
+  space.store.replace_entry(month, entry.clone())?;
+  space.mark_self_write();
   Ok(Json(entry))
 }
 
-pub async fn remove(State(state): State<AppState>, Path(id): Path<String>) -> ApiResult<Json<Value>> {
-  let _guard = state.write_lock.lock().await;
-  match state.store.delete_entry(&id)? {
+pub async fn remove(space: Space, Path(id): Path<String>) -> ApiResult<Json<Value>> {
+  let _guard = space.write_lock.lock().await;
+  match space.store.delete_entry(&id)? {
     Some(entry) => {
-      state.mark_self_write();
+      space.mark_self_write();
       Ok(Json(json!({ "deleted": 1, "entry": entry })))
     }
-    None => Err(ApiError::not_found(format!("saisie « {id} » introuvable"))),
+    None => Err(ApiError::not_found(tr!("entry “{id}” not found", id = id))),
   }
 }
 
 #[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CopyInput {
-  /// `day` (défaut) ou `week`.
+  /// `day` (default) or `week`.
   #[serde(default)]
   pub mode: Option<String>,
-  /// Jour source, ou n'importe quel jour de la semaine source.
+  /// The source day, or any day of the source week.
   pub source: String,
   #[serde(default)]
   pub target: Option<String>,
-  /// Plusieurs cibles à la fois (« recopie lundi sur mardi, mercredi, jeudi »).
+  /// Several targets at once ("copy Monday to Tuesday, Wednesday, Thursday").
   #[serde(default)]
   pub targets: Option<Vec<String>>,
-  /// Vide la cible avant de copier.
+  /// Empties the target before copying.
   #[serde(default)]
   pub replace: Option<bool>,
-  /// En mode semaine, ne recopie pas samedi et dimanche.
+  /// In week mode, leaves Saturday and Sunday out.
   #[serde(default)]
   pub skip_weekend: Option<bool>,
-  /// Remplace le commentaire de toutes les copies.
+  /// Replaces the comment of every copy.
   #[serde(default)]
   pub comment: Option<String>,
 }
 
-pub async fn copy(State(state): State<AppState>, Json(input): Json<CopyInput>) -> ApiResult<Json<Value>> {
+pub async fn copy(space: Space, Json(input): Json<CopyInput>) -> ApiResult<Json<Value>> {
   let mode = input.mode.as_deref().unwrap_or("day").to_lowercase();
   let source = parse_date(&input.source)?;
   let replace = input.replace.unwrap_or(false);
@@ -251,21 +248,21 @@ pub async fn copy(State(state): State<AppState>, Json(input): Json<CopyInput>) -
     targets.push(parse_date(target)?);
   }
   if targets.is_empty() {
-    return Err(ApiError::bad_request("précise `target` (ou `targets`)"));
+    return Err(ApiError::bad_request(tr!("give `target` (or `targets`)")));
   }
 
-  let _guard = state.write_lock.lock().await;
+  let _guard = space.write_lock.lock().await;
   let mut created = Vec::new();
 
   match mode.as_str() {
     "day" => {
-      let originals = state.store.entries_between(source, source)?;
+      let originals = space.store.entries_between(source, source)?;
       if originals.is_empty() {
-        return Err(ApiError::bad_request(format!("aucune saisie le {source}")));
+        return Err(ApiError::bad_request(tr!("no entry on {date}", date = source)));
       }
       for target in targets {
         if replace {
-          clear_range(&state, target, target, None)?;
+          clear_range(&space, target, target, None)?;
         }
         for original in &originals {
           created.push(duplicate(original, target, input.comment.as_deref()));
@@ -274,15 +271,15 @@ pub async fn copy(State(state): State<AppState>, Json(input): Json<CopyInput>) -
     }
     "week" => {
       let source_monday = monday_of(source);
-      let originals = state.store.entries_between(source_monday, source_monday + Duration::days(6))?;
+      let originals = space.store.entries_between(source_monday, source_monday + Duration::days(6))?;
       if originals.is_empty() {
-        return Err(ApiError::bad_request(format!("aucune saisie dans la semaine du {source_monday}")));
+        return Err(ApiError::bad_request(tr!("no entry in the week of {date}", date = source_monday)));
       }
       for target in targets {
         let target_monday = monday_of(target);
         let shift = (target_monday - source_monday).num_days();
         if replace {
-          clear_range(&state, target_monday, target_monday + Duration::days(6), None)?;
+          clear_range(&space, target_monday, target_monday + Duration::days(6), None)?;
         }
         for original in &originals {
           let date = original.date + Duration::days(shift);
@@ -293,11 +290,11 @@ pub async fn copy(State(state): State<AppState>, Json(input): Json<CopyInput>) -
         }
       }
     }
-    other => return Err(ApiError::bad_request(format!("mode « {other} » inconnu — utilise `day` ou `week`"))),
+    other => return Err(ApiError::bad_request(tr!("unknown mode “{mode}” — use `day` or `week`", mode = other))),
   }
 
-  let created = state.store.insert_entries(created)?;
-  state.mark_self_write();
+  let created = space.store.insert_entries(created)?;
+  space.mark_self_write();
   Ok(Json(json!({ "created": created.len(), "entries": created })))
 }
 
@@ -307,33 +304,33 @@ pub struct ClearInput {
   pub from: String,
   #[serde(default)]
   pub to: Option<String>,
-  /// Restreint l'effacement à un projet.
+  /// Limits the deletion to one project.
   #[serde(default)]
   pub project: Option<Loose>,
-  /// Compte sans rien supprimer.
+  /// Counts without deleting anything.
   #[serde(default)]
   pub dry_run: Option<bool>,
 }
 
-pub async fn clear(State(state): State<AppState>, Json(input): Json<ClearInput>) -> ApiResult<Json<Value>> {
+pub async fn clear(space: Space, Json(input): Json<ClearInput>) -> ApiResult<Json<Value>> {
   let from = parse_date(&input.from)?;
   let to = match &input.to {
     Some(raw) => parse_date(raw)?,
     None => from,
   };
   if to < from {
-    return Err(ApiError::bad_request("l'intervalle se termine avant de commencer"));
+    return Err(ApiError::bad_request(tr!("the range ends before it starts")));
   }
 
   let project_id = match &input.project {
     Some(reference) => {
-      let catalog = state.store.catalog()?;
+      let catalog = space.store.catalog()?;
       Some(parse::find_project(&catalog, &reference.as_text()).into_result().map_err(ApiError::bad_request)?.id.clone())
     }
     None => None,
   };
 
-  let matching: Vec<Entry> = state
+  let matching: Vec<Entry> = space
     .store
     .entries_between(from, to)?
     .into_iter()
@@ -344,17 +341,17 @@ pub async fn clear(State(state): State<AppState>, Json(input): Json<ClearInput>)
     return Ok(Json(json!({ "would_delete": matching.len(), "entries": matching })));
   }
 
-  let _guard = state.write_lock.lock().await;
-  let deleted = clear_range(&state, from, to, project_id.as_deref())?;
-  state.mark_self_write();
+  let _guard = space.write_lock.lock().await;
+  let deleted = clear_range(&space, from, to, project_id.as_deref())?;
+  space.mark_self_write();
   Ok(Json(json!({ "deleted": deleted })))
 }
 
-/// Supprime les saisies d'un intervalle, mois par mois.
-fn clear_range(state: &AppState, from: NaiveDate, to: NaiveDate, project_id: Option<&str>) -> ApiResult<usize> {
+/// Deletes the entries of a range, month by month.
+fn clear_range(space: &Space, from: NaiveDate, to: NaiveDate, project_id: Option<&str>) -> ApiResult<usize> {
   let mut deleted = 0;
   for month in YearMonth::range(from, to) {
-    let mut file = state.store.month(month)?;
+    let mut file = space.store.month(month)?;
     let before = file.entries.len();
     file.entries.retain(|e| {
       let in_range = e.date >= from && e.date <= to;
@@ -363,8 +360,8 @@ fn clear_range(state: &AppState, from: NaiveDate, to: NaiveDate, project_id: Opt
     });
     if file.entries.len() != before {
       deleted += before - file.entries.len();
-      state.store.save_month(&mut file)?;
-      state.store.notify(Change::month(month));
+      space.store.save_month(&mut file)?;
+      space.store.notify(Change::month(month));
     }
   }
   Ok(deleted)
@@ -389,7 +386,7 @@ fn duplicate(original: &Entry, date: NaiveDate, comment: Option<&str>) -> Entry 
 }
 
 // ---------------------------------------------------------------------------
-// Chronomètre
+// Timer
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Deserialize)]
@@ -403,25 +400,25 @@ pub struct TimerStart {
   pub activity: Option<Loose>,
   #[serde(default, alias = "description")]
   pub comment: Option<String>,
-  /// Heure de départ si le chronomètre est lancé après coup (`"08:30"`).
+  /// Start time when the timer is started after the fact (`"08:30"`).
   #[serde(default)]
   pub started_at: Option<String>,
 }
 
-pub async fn get_timer(State(state): State<AppState>) -> ApiResult<Json<Option<RunningTimer>>> {
-  Ok(Json(state.store.timer()?))
+pub async fn get_timer(space: Space) -> ApiResult<Json<Option<RunningTimer>>> {
+  Ok(Json(space.store.timer()?))
 }
 
-pub async fn start_timer(State(state): State<AppState>, Json(input): Json<TimerStart>) -> ApiResult<Json<RunningTimer>> {
-  let _guard = state.write_lock.lock().await;
-  if let Some(running) = state.store.timer()? {
-    return Err(ApiError::conflict(format!(
-      "un chronomètre tourne déjà depuis {} — arrête-le d'abord",
-      running.started_at.format("%d.%m.%Y %H:%M")
+pub async fn start_timer(space: Space, Json(input): Json<TimerStart>) -> ApiResult<Json<RunningTimer>> {
+  let _guard = space.write_lock.lock().await;
+  if let Some(running) = space.store.timer()? {
+    return Err(ApiError::conflict(tr!(
+      "a timer has been running since {since} — stop it first",
+      since = running.started_at.format("%d.%m.%Y %H:%M")
     )));
   }
 
-  let catalog = state.store.catalog()?;
+  let catalog = space.store.catalog()?;
   let (project_id, activity_id, preset_comment) =
     resolve_target(&catalog, input.preset.as_deref(), input.project.as_ref(), input.activity.as_ref())
       .map_err(ApiError::bad_request)?;
@@ -440,9 +437,9 @@ pub async fn start_timer(State(state): State<AppState>, Json(input): Json<TimerS
     comment: input.comment.or(preset_comment).unwrap_or_default(),
     started_at,
   };
-  state.store.save_timer(Some(&timer))?;
-  state.mark_self_write();
-  state.store.notify(Change::scope("timer"));
+  space.store.save_timer(Some(&timer))?;
+  space.mark_self_write();
+  space.store.notify(Change::scope("timer"));
   Ok(Json(timer))
 }
 
@@ -451,24 +448,24 @@ pub async fn start_timer(State(state): State<AppState>, Json(input): Json<TimerS
 pub struct TimerStop {
   #[serde(default, alias = "description")]
   pub comment: Option<String>,
-  /// Arrondit la durée au multiple de minutes indiqué (5, 15…).
+  /// Rounds the duration to the given number of minutes (5, 15…).
   #[serde(default)]
   pub round_to: Option<u32>,
-  /// Jette la saisie au lieu de l'enregistrer.
+  /// Throws the entry away instead of saving it.
   #[serde(default)]
   pub discard: Option<bool>,
 }
 
-pub async fn stop_timer(State(state): State<AppState>, body: Option<Json<TimerStop>>) -> ApiResult<Json<Value>> {
+pub async fn stop_timer(space: Space, body: Option<Json<TimerStop>>) -> ApiResult<Json<Value>> {
   let input = body.map(|Json(v)| v).unwrap_or_default();
-  let _guard = state.write_lock.lock().await;
-  let Some(timer) = state.store.timer()? else {
-    return Err(ApiError::not_found("aucun chronomètre en cours"));
+  let _guard = space.write_lock.lock().await;
+  let Some(timer) = space.store.timer()? else {
+    return Err(ApiError::not_found(tr!("no timer running")));
   };
 
-  state.store.save_timer(None)?;
-  state.mark_self_write();
-  state.store.notify(Change::scope("timer"));
+  space.store.save_timer(None)?;
+  space.mark_self_write();
+  space.store.notify(Change::scope("timer"));
 
   if input.discard.unwrap_or(false) {
     return Ok(Json(json!({ "discarded": true })));
@@ -495,15 +492,15 @@ pub async fn stop_timer(State(state): State<AppState>, body: Option<Json<TimerSt
     created_at: now,
     updated_at: now,
   };
-  let created = state.store.insert_entries(vec![entry])?;
+  let created = space.store.insert_entries(vec![entry])?;
   Ok(Json(json!({ "created": 1, "entries": created })))
 }
 
 // ---------------------------------------------------------------------------
-// Construction des saisies
+// Building entries
 // ---------------------------------------------------------------------------
 
-/// Construit une saisie complète à partir d'une description libre.
+/// Builds a complete entry from a free description.
 pub fn build_entry(catalog: &crate::model::Catalog, input: EntryInput) -> Result<Entry, String> {
   let date = match &input.date {
     Some(raw) => parse_date_str(raw)?,
@@ -542,7 +539,7 @@ pub fn build_entry(catalog: &crate::model::Catalog, input: EntryInput) -> Result
   })
 }
 
-/// Applique une modification partielle à une saisie existante.
+/// Applies a partial change to an existing entry.
 fn apply_input(catalog: &crate::model::Catalog, entry: &mut Entry, mut input: EntryInput) -> Result<(), String> {
   if let Some(raw) = &input.date {
     entry.date = parse_date_str(raw)?;
@@ -574,7 +571,7 @@ fn apply_input(catalog: &crate::model::Catalog, entry: &mut Entry, mut input: En
     };
   }
 
-  // La durée suit ce qui a été fourni : explicite, sinon déduite des horaires.
+  // The duration follows what was given: explicit, else derived from the times.
   if input.minutes.is_some() || input.hours.is_some() || input.duration.is_some() {
     entry.minutes = resolve_minutes(&input, entry.start, entry.end)?;
     if let Some(start) = entry.start {
@@ -585,7 +582,7 @@ fn apply_input(catalog: &crate::model::Catalog, entry: &mut Entry, mut input: En
   }
 
   if entry.minutes == 0 {
-    return Err("durée nulle".to_string());
+    return Err(tr!("zero duration"));
   }
   Ok(())
 }
@@ -602,30 +599,34 @@ fn resolve_minutes(input: &EntryInput, start: Option<NaiveTime>, end: Option<Nai
   }
   match (start, end) {
     (Some(start), Some(end)) => span_minutes(start, end),
-    _ => Err("durée manquante — indique `duration` (« 1h30 »), `minutes`, `hours`, ou `start` et `end`".to_string()),
+    _ => Err(tr!("missing duration — give `duration` (“1h30”), `minutes`, `hours`, or `start` and `end`")),
   }
 }
 
 fn span_minutes(start: NaiveTime, end: NaiveTime) -> Result<u32, String> {
   let minutes = (end - start).num_minutes();
   if minutes <= 0 {
-    return Err(format!("l'heure de fin ({end}) n'est pas après l'heure de début ({start})"));
+    return Err(tr!(
+      "the end time ({end}) is not after the start time ({start})",
+      end = end.format("%H:%M"),
+      start = start.format("%H:%M")
+    ));
   }
   check_minutes(minutes as u32)
 }
 
 fn check_minutes(minutes: u32) -> Result<u32, String> {
   if minutes == 0 {
-    Err("durée nulle".to_string())
+    Err(tr!("zero duration"))
   } else if minutes > 24 * 60 {
-    Err("durée supérieure à 24 h".to_string())
+    Err(tr!("duration over 24 h"))
   } else {
     Ok(minutes)
   }
 }
 
-/// Détermine (projet, activité, commentaire par défaut) à partir d'une tâche
-/// et/ou de références explicites, ces dernières l'emportant.
+/// Works out (project, activity, default comment) from a task and/or explicit
+/// references, the latter winning.
 fn resolve_target(
   catalog: &crate::model::Catalog,
   preset: Option<&str>,
@@ -640,8 +641,8 @@ fn resolve_target(
     let preset = parse::find_preset(catalog, preset).into_result()?;
     project_id = Some(preset.project_id.clone());
     activity_id = Some(preset.activity_id.clone());
-    // À défaut de commentaire propre à la tâche, son libellé fait un bon défaut :
-    // c'est ce qui finira dans la colonne « Remarque » de SageX.
+    // Without a comment of its own, the task's label makes a good default:
+    // it is what ends up in SageX's « Remarque » column.
     comment = Some(preset.comment.clone().unwrap_or_else(|| preset.label.clone()));
   }
   if let Some(project) = project {
@@ -653,8 +654,8 @@ fn resolve_target(
 
   match (project_id, activity_id) {
     (Some(p), Some(a)) => Ok((p, a, comment)),
-    (None, _) => Err("projet manquant — indique `preset` ou `project`".to_string()),
-    (_, None) => Err("activité manquante — indique `preset` ou `activity`".to_string()),
+    (None, _) => Err(tr!("missing project — give `preset` or `project`")),
+    (_, None) => Err(tr!("missing activity — give `preset` or `activity`")),
   }
 }
 
@@ -666,13 +667,13 @@ pub fn parse_date(raw: &str) -> ApiResult<NaiveDate> {
   parse_date_str(raw).map_err(ApiError::bad_request)
 }
 
-/// ISO `2026-09-16`, `16.09.2026`, `16/09/2026`, ou `today` / `yesterday` /
-/// `aujourd'hui` / `hier` / `demain`.
+/// ISO `2026-09-16`, `16.09.2026`, `16/09/2026`, or `today` / `yesterday` /
+/// `tomorrow`, in English or French.
 pub fn parse_date_str(raw: &str) -> Result<NaiveDate, String> {
   let raw = raw.trim();
   let today = Local::now().date_naive();
   match raw.to_lowercase().as_str() {
-    "today" | "aujourd'hui" | "aujourdhui" => return Ok(today),
+    "today" | "aujourd'hui" | "aujourd’hui" | "aujourdhui" => return Ok(today),
     "yesterday" | "hier" => return Ok(today - Duration::days(1)),
     "tomorrow" | "demain" => return Ok(today + Duration::days(1)),
     _ => {}
@@ -682,7 +683,7 @@ pub fn parse_date_str(raw: &str) -> Result<NaiveDate, String> {
       return Ok(date);
     }
   }
-  Err(format!("date « {raw} » incomprise — format attendu AAAA-MM-JJ"))
+  Err(tr!("date “{raw}” not understood — expected format YYYY-MM-DD", raw = raw))
 }
 
 pub fn monday_of(date: NaiveDate) -> NaiveDate {
@@ -696,30 +697,30 @@ pub struct TogglImportInput {
   pub from: Option<String>,
   #[serde(default)]
   pub to: Option<String>,
-  /// Raccourci pour un mois entier (`"2026-07"`).
+  /// Shortcut for a whole month (`"2026-07"`).
   #[serde(default)]
   pub month: Option<String>,
   #[serde(default)]
   pub dry_run: Option<bool>,
 }
 
-/// Rapatrie une période depuis Toggl Track.
-pub async fn import_toggl(State(state): State<AppState>, Json(input): Json<TogglImportInput>) -> ApiResult<Json<Value>> {
+/// Brings a period back from Toggl Track.
+pub async fn import_toggl(space: Space, Json(input): Json<TogglImportInput>) -> ApiResult<Json<Value>> {
   let (from, to) = match (&input.from, &input.to, &input.month) {
     (_, _, Some(month)) => {
       let month: YearMonth = month.parse().map_err(|e: crate::model::ParseYearMonthError| ApiError::bad_request(e.to_string()))?;
       (month.first_day(), month.last_day())
     }
     (Some(from), Some(to), None) => (parse_date(from)?, parse_date(to)?),
-    _ => return Err(ApiError::bad_request("précise `month`, ou `from` et `to`")),
+    _ => return Err(ApiError::bad_request(tr!("give `month`, or `from` and `to`"))),
   };
 
   let dry_run = input.dry_run.unwrap_or(false);
-  let _guard = state.write_lock.lock().await;
-  let summary = crate::toggl::run(&state.store, from, to, dry_run)
+  let _guard = space.write_lock.lock().await;
+  let summary = crate::toggl::run(&space.store, from, to, dry_run)
     .await
-    .map_err(|e| ApiError::bad_request(format!("{e:#}")))?;
-  state.mark_self_write();
+    .map_err(|e| ApiError::bad_request(tr!("Toggl import: {error}", error = format!("{e:#}"))))?;
+  space.mark_self_write();
   Ok(Json(json!({ "dry_run": dry_run, "from": from, "to": to, "summary": summary })))
 }
 
@@ -762,7 +763,7 @@ mod tests {
 
   #[test]
   fn preset_label_is_the_default_comment() {
-    // La tâche « Ra&D Subice » n'a pas de commentaire propre : son libellé sert de défaut.
+    // A task without a comment of its own: its label is the default.
     let mut catalog = catalog();
     catalog.presets[0].comment = None;
     let entry = build_entry(&catalog, input(r#"{"date":"2026-09-16","preset":"Daily","duration":"1h"}"#)).unwrap();
@@ -816,20 +817,29 @@ mod tests {
   #[test]
   fn missing_pieces_produce_actionable_errors() {
     let err = build_entry(&catalog(), input(r#"{"date":"2026-09-16","project":"SPL Base","activity":4}"#)).unwrap_err();
-    assert!(err.contains("durée manquante"), "{err}");
+    assert!(err.contains("missing duration"), "{err}");
 
     let err = build_entry(&catalog(), input(r#"{"date":"2026-09-16","duration":"1h"}"#)).unwrap_err();
-    assert!(err.contains("projet manquant"), "{err}");
+    assert!(err.contains("missing project"), "{err}");
 
-    let err = build_entry(&catalog(), input(r#"{"date":"2026-09-16","project":"Inconnu","duration":"1h"}"#)).unwrap_err();
-    assert!(err.contains("introuvable"), "{err}");
+    let err = build_entry(&catalog(), input(r#"{"date":"2026-09-16","project":"Unknown","duration":"1h"}"#)).unwrap_err();
+    assert!(err.contains("not found"), "{err}");
 
     let err = build_entry(
       &catalog(),
       input(r#"{"date":"2026-09-16","preset":"Daily","start":"10:00","end":"09:00"}"#),
     )
     .unwrap_err();
-    assert!(err.contains("pas après"), "{err}");
+    assert!(err.contains("not after"), "{err}");
+  }
+
+  #[tokio::test]
+  async fn errors_follow_the_requests_language() {
+    let err = crate::i18n::scope(crate::i18n::Lang::Fr, async {
+      build_entry(&catalog(), input(r#"{"date":"2026-09-16","project":"SPL Base","activity":4}"#)).unwrap_err()
+    })
+    .await;
+    assert!(err.starts_with("durée manquante"), "{err}");
   }
 
   #[test]
@@ -841,7 +851,7 @@ mod tests {
     .unwrap();
     apply_input(&catalog(), &mut entry, input(r#"{"start":null,"end":null}"#)).unwrap();
     assert!(entry.start.is_none() && entry.end.is_none());
-    assert_eq!(entry.minutes, 60, "la durée survit à la suppression des horaires");
+    assert_eq!(entry.minutes, 60, "the duration survives clearing the times");
 
     apply_input(&catalog(), &mut entry, input(r#"{"duration":"2h"}"#)).unwrap();
     assert_eq!(entry.minutes, 120);
@@ -852,6 +862,7 @@ mod tests {
     assert_eq!(parse_date_str("2026-09-16").unwrap(), NaiveDate::from_ymd_opt(2026, 9, 16).unwrap());
     assert_eq!(parse_date_str("16.09.2026").unwrap(), NaiveDate::from_ymd_opt(2026, 9, 16).unwrap());
     assert_eq!(parse_date_str("hier").unwrap(), Local::now().date_naive() - Duration::days(1));
+    assert_eq!(parse_date_str("Yesterday").unwrap(), Local::now().date_naive() - Duration::days(1));
     assert!(parse_date_str("le 16").is_err());
   }
 

@@ -1,8 +1,8 @@
-//! Construction des lignes SageX et écriture du fichier xlsx.
+//! Building the SageX rows and writing the xlsx file.
 //!
-//! Les colonnes reproduisent exactement ce qu'attend l'importeur SageX :
-//! A n° école, B n° collaborateur, C n° projet, D n° activité, E heures `HHhMM`,
-//! F heures en centième (laissée vide), G date, H commentaire, I n° personne.
+//! The columns are exactly what SageX's importer expects: A school number,
+//! B employee number, C project number, D activity number, E hours `HHhMM`,
+//! F hours in hundredths (left empty), G date, H comment, I person number.
 
 use crate::model::{Catalog, Entry, YearMonth};
 use crate::settings::{Aggregate, CommentStyle, Settings};
@@ -12,30 +12,43 @@ use rust_xlsxwriter::{Format, Workbook};
 use serde::Serialize;
 use std::collections::BTreeMap;
 
-/// Une ligne du fichier d'import.
+/// A row of the import file.
 #[derive(Debug, Clone, Serialize)]
 pub struct Row {
   pub school_number: u32,
   pub employee_number: u32,
   pub project_number: u32,
   pub activity_number: u32,
-  /// `"08h30"`, éventuellement au-delà de 99 h pour une ligne mensuelle.
+  /// `"08h30"`, possibly beyond 99 h for a monthly row.
   pub hours: String,
   pub date: NaiveDate,
   pub comment: String,
   pub person_number: u64,
-  /// Minutes cumulées, pour les totaux et les contrôles.
+  /// Total minutes, for the totals and the checks.
   pub minutes: u32,
-  /// Identifiants des saisies résumées par la ligne.
+  /// Identifiers of the entries the row sums up.
   pub entry_ids: Vec<String>,
 }
 
-/// Saisies écartées de l'export, avec la raison.
+/// Why an entry stays out of the export.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SkipKind {
+  UnknownProject,
+  UnknownActivity,
+  /// A project marked not exportable, or without a SageX number.
+  NotExported,
+  ZeroDuration,
+}
+
+/// An entry left out of the export, with the reason.
 #[derive(Debug, Clone, Serialize)]
 pub struct Skipped {
   pub entry_id: String,
   pub date: NaiveDate,
   pub minutes: u32,
+  pub kind: SkipKind,
+  /// The reason in words, in the request's language.
   pub reason: String,
 }
 
@@ -51,32 +64,32 @@ impl Export {
   }
 }
 
-/// Regroupe les saisies selon le mode d'agrégation et produit les lignes SageX.
+/// Groups the entries by the aggregation mode and produces the SageX rows.
 pub fn build(entries: &[Entry], catalog: &Catalog, settings: &Settings, month: Option<YearMonth>) -> Export {
   let mut skipped = Vec::new();
-  // Clé de regroupement → (n° projet, n° activité, date de la ligne, saisies).
+  // Grouping key → (project number, activity number, row date), entries.
   let mut groups: BTreeMap<(u32, u32, NaiveDate), Vec<&Entry>> = BTreeMap::new();
 
   for entry in entries {
     let Some(project) = catalog.project(&entry.project_id) else {
-      skipped.push(reject(entry, format!("projet « {} » absent du catalogue", entry.project_id)));
+      skipped.push(reject(entry, SkipKind::UnknownProject, tr!("project “{id}” is not in the catalogue", id = entry.project_id)));
       continue;
     };
     let Some(activity) = catalog.activity(&entry.activity_id) else {
-      skipped.push(reject(entry, format!("activité « {} » absente du catalogue", entry.activity_id)));
+      skipped.push(reject(entry, SkipKind::UnknownActivity, tr!("activity “{id}” is not in the catalogue", id = entry.activity_id)));
       continue;
     };
     if !project.exportable || project.sagex_number == 0 {
-      skipped.push(reject(entry, format!("projet « {} » exclu de l'export", project.name)));
+      skipped.push(reject(entry, SkipKind::NotExported, tr!("project “{name}” is excluded from the export", name = project.name)));
       continue;
     }
     if entry.minutes == 0 {
-      skipped.push(reject(entry, "durée nulle".to_string()));
+      skipped.push(reject(entry, SkipKind::ZeroDuration, tr!("zero duration")));
       continue;
     }
 
     let date = match settings.export.aggregate {
-      // Une ligne mensuelle est datée du dernier jour du mois, comme l'exige la directive.
+      // A monthly row is dated the last day of the month, as the directive requires.
       Aggregate::Month => month.unwrap_or_else(|| YearMonth::of(entry.date)).last_day(),
       Aggregate::Day | Aggregate::None => entry.date,
     };
@@ -85,14 +98,14 @@ pub fn build(entries: &[Entry], catalog: &Catalog, settings: &Settings, month: O
 
   let mut rows = Vec::new();
   for ((project_number, activity_number, date), mut group) in groups {
-    // Ligne mensuelle : du plus récent au plus ancien, comme le faisait sagex-rs.
-    // Ligne journalière : ordre chronologique, plus naturel à relire.
+    // Monthly row: newest first, as sagex-rs did.
+    // Daily row: in chronological order, easier to read back.
     match settings.export.aggregate {
       Aggregate::Month => group.sort_by(|a, b| b.date.cmp(&a.date).then(b.start.cmp(&a.start))),
       Aggregate::Day | Aggregate::None => group.sort_by(|a, b| a.date.cmp(&b.date).then(a.start.cmp(&b.start))),
     }
 
-    // Sans agrégation, chaque saisie garde sa ligne.
+    // Without aggregation, each entry keeps its own row.
     let chunks: Vec<Vec<&Entry>> = match settings.export.aggregate {
       Aggregate::None => group.into_iter().map(|e| vec![e]).collect(),
       _ => vec![group],
@@ -120,16 +133,16 @@ pub fn build(entries: &[Entry], catalog: &Catalog, settings: &Settings, month: O
   Export { rows, skipped }
 }
 
-fn reject(entry: &Entry, reason: String) -> Skipped {
-  Skipped { entry_id: entry.id.clone(), date: entry.date, minutes: entry.minutes, reason }
+fn reject(entry: &Entry, kind: SkipKind, reason: String) -> Skipped {
+  Skipped { entry_id: entry.id.clone(), date: entry.date, minutes: entry.minutes, kind, reason }
 }
 
-/// `"08h30"`. Les lignes mensuelles peuvent dépasser 99 h.
+/// `"08h30"`. Monthly rows can go beyond 99 h.
 pub fn format_hours(minutes: u32) -> String {
   format!("{:02}h{:02}", minutes / 60, minutes % 60)
 }
 
-/// Assemble la colonne « Commentaire » en respectant la limite varchar1000.
+/// Puts the « Commentaire » column together within the varchar1000 limit.
 fn build_comment(entries: &[&Entry], settings: &Settings, with_dates: bool) -> String {
   let separator = &settings.export.comment_separator;
   let max = settings.export.comment_max_len;
@@ -168,12 +181,12 @@ fn build_comment(entries: &[&Entry], settings: &Settings, with_dates: bool) -> S
   truncate(text, max)
 }
 
-/// Regroupe les descriptions identiques : `"Draft biblio (30.07, 29.07, 24.07)"`.
+/// Groups identical descriptions: `"Draft biblio (3×: 30.07, 29.07, 24.07)"`.
 fn compact_comment(entries: &[&Entry], settings: &Settings, with_dates: bool) -> String {
   let mut order: Vec<String> = Vec::new();
   let mut dates: BTreeMap<String, Vec<String>> = BTreeMap::new();
   for entry in entries {
-    let label = if entry.comment.is_empty() { "(sans commentaire)".to_string() } else { entry.comment.clone() };
+    let label = if entry.comment.is_empty() { tr!("(no comment)") } else { entry.comment.clone() };
     if !order.contains(&label) {
       order.push(label.clone());
     }
@@ -194,7 +207,7 @@ fn compact_comment(entries: &[&Entry], settings: &Settings, with_dates: bool) ->
       match days.len() {
         0 => label,
         1 => format!("{label} ({})", days[0]),
-        n => format!("{label} ({n}× : {})", days.join(", ")),
+        n => tr!("{label} ({count}×: {days})", label = label, count = n, days = days.join(", ")),
       }
     })
     .collect::<Vec<_>>()
@@ -210,7 +223,7 @@ fn truncate(text: String, max: usize) -> String {
   out
 }
 
-/// Écrit le classeur et retourne ses octets.
+/// Writes the workbook and returns its bytes.
 pub fn to_xlsx(rows: &[Row], settings: &Settings) -> Result<Vec<u8>> {
   let mut workbook = Workbook::new();
   let sheet = workbook.add_worksheet();
@@ -227,7 +240,7 @@ pub fn to_xlsx(rows: &[Row], settings: &Settings) -> Result<Vec<u8>> {
     sheet.write_number(line, 2, row.project_number as f64)?;
     sheet.write_number(line, 3, row.activity_number as f64)?;
     sheet.write_string(line, 4, &row.hours)?;
-    // Colonne F (« Heures en centième ») volontairement vide : SageX la calcule.
+    // Column F (« Heures en centième ») is left empty on purpose: SageX computes it.
     sheet.write_number_with_format(line, 6, excel_serial(row.date), &date_format)?;
     sheet.write_string(line, 7, &row.comment)?;
     sheet.write_number(line, 8, row.person_number as f64)?;
@@ -237,9 +250,9 @@ pub fn to_xlsx(rows: &[Row], settings: &Settings) -> Result<Vec<u8>> {
   Ok(workbook.save_to_buffer()?)
 }
 
-/// Nombre de jours depuis l'origine des dates Excel (1899-12-30).
+/// Number of days since the origin of Excel dates (1899-12-30).
 fn excel_serial(date: NaiveDate) -> f64 {
-  let origin = NaiveDate::from_ymd_opt(1899, 12, 30).expect("origine Excel");
+  let origin = NaiveDate::from_ymd_opt(1899, 12, 30).expect("the Excel origin");
   (date - origin).num_days() as f64
 }
 
@@ -300,7 +313,7 @@ mod tests {
     let spl = export.rows.iter().find(|r| r.project_number == 89403).unwrap();
     assert_eq!(spl.hours, "01h00");
     assert_eq!(spl.activity_number, 4);
-    // Toutes les lignes portent le dernier jour du mois.
+    // Every row carries the last day of the month.
     assert_eq!(spl.date.to_string(), "2026-07-31");
     assert_eq!(spl.comment, "03.07.2026 - Daily | 02.07.2026 - Daily");
     assert_eq!(spl.school_number, 1);
@@ -327,7 +340,8 @@ mod tests {
     let export = build(&entries, &catalog(), &settings(), Some("2026-07".parse().unwrap()));
     assert_eq!(export.rows.len(), 1);
     assert_eq!(export.skipped.len(), 1);
-    assert!(export.skipped[0].reason.contains("exclu de l'export"));
+    assert_eq!(export.skipped[0].kind, SkipKind::NotExported);
+    assert!(export.skipped[0].reason.contains("excluded from the export"));
   }
 
   #[test]
@@ -344,7 +358,7 @@ mod tests {
     let first = &export.rows[0];
     assert_eq!(first.date.to_string(), "2026-07-02");
     assert_eq!(first.hours, "01h30");
-    // Pas de préfixe de date sur une ligne déjà datée du jour.
+    // No date prefix on a row already dated by day.
     assert_eq!(first.comment, "Daily | Sprint");
   }
 
@@ -356,9 +370,21 @@ mod tests {
     }
     let export = build(&entries, &catalog(), &settings(), Some("2026-07".parse().unwrap()));
     let comment = &export.rows[0].comment;
-    assert!(comment.chars().count() <= 1000, "longueur {}", comment.chars().count());
-    // Le mode « auto » a basculé en compact : une seule fois le libellé, puis les dates.
-    assert!(comment.starts_with("Bibliographie et rédaction du rapport (28× : 28.07"), "{comment}");
+    assert!(comment.chars().count() <= 1000, "length {}", comment.chars().count());
+    // "Auto" switched to compact: the label once, then the dates.
+    assert!(comment.starts_with("Bibliographie et rédaction du rapport (28×: 28.07"), "{comment}");
+  }
+
+  #[tokio::test]
+  async fn compact_comments_follow_the_language() {
+    let entries: Vec<Entry> = (1..=28).map(|day| entry(&format!("2026-07-{day:02}"), "subice", "ra-d", 240, "")).collect();
+    let mut settings = settings();
+    settings.export.comment_style = CommentStyle::Compact;
+    let comment = crate::i18n::scope(crate::i18n::Lang::Fr, async {
+      build(&entries, &catalog(), &settings, Some("2026-07".parse().unwrap())).rows[0].comment.clone()
+    })
+    .await;
+    assert!(comment.starts_with("(sans commentaire) (28× : 28.07"), "{comment}");
   }
 
   #[test]
@@ -366,13 +392,13 @@ mod tests {
     let entries = vec![entry("2026-07-02", "spl-base", "seance", 90, "Daily")];
     let export = build(&entries, &catalog(), &settings(), Some("2026-07".parse().unwrap()));
     let bytes = to_xlsx(&export.rows, &settings()).unwrap();
-    assert!(bytes.starts_with(b"PK"), "un xlsx est une archive zip");
+    assert!(bytes.starts_with(b"PK"), "an xlsx is a zip archive");
     assert!(bytes.len() > 2000);
   }
 
   #[test]
   fn excel_serial_matches_the_reference_value() {
-    // 46234 est la valeur écrite par sagex-rs pour le 31.07.2026.
+    // 46234 is the value sagex-rs wrote for 31.07.2026.
     assert_eq!(excel_serial(NaiveDate::from_ymd_opt(2026, 7, 31).unwrap()), 46234.0);
   }
 }

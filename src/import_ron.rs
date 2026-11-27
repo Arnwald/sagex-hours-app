@@ -1,9 +1,9 @@
-//! Conversion du `sagex-rs.ron` (Toggl → SageX) vers le catalogue à trois listes.
+//! Converts `sagex-rs.ron` (Toggl → SageX) into the three-list catalog.
 //!
-//! Dans le RON, la paire (n° activité, nom activité) est répétée dans chaque
-//! projet Toggl. On la dédoublonne ici pour obtenir une liste d'activités
-//! réutilisable par n'importe quel projet, conformément à ce que SageX attend
-//! réellement (cf. directive « Saisie des heures SageX 2026 »).
+//! In the RON, the (activity number, activity name) pair is repeated in every
+//! Toggl project. It is deduplicated here into one list of activities usable
+//! by any project, which is what SageX actually expects (see the directive
+//! "Saisie des heures SageX 2026").
 
 use crate::model::{Activity, Catalog, Preset, Project, TogglRef};
 use crate::settings::{Aggregate, Settings};
@@ -12,7 +12,7 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-/// Sous-ensemble utile du `sagex-rs.ron`. Les champs absents sont ignorés.
+/// The useful subset of `sagex-rs.ron`. Other fields are ignored.
 #[derive(Debug, Deserialize)]
 #[serde(rename = "Config")]
 struct RonConfig {
@@ -30,7 +30,7 @@ struct RonConfig {
   sagex_school_number: u32,
   #[serde(default)]
   sagex_activities: HashMap<String, u32>,
-  /// client Toggl → projet Toggl → ((n° projet SageX, nom), (n° activité, nom))
+  /// Toggl client → Toggl project → ((SageX project number, name), (activity number, name))
   #[serde(default)]
   projects: HashMap<String, HashMap<String, ((u32, String), (u32, String))>>,
   #[serde(default)]
@@ -41,7 +41,7 @@ fn one() -> u32 {
   1
 }
 
-/// Identifiants lisibles pour les activités SageX standard (numéros stables).
+/// Readable identifiers for the standard SageX activities (stable numbers).
 fn preferred_activity_id(number: u32) -> Option<&'static str> {
   Some(match number {
     0 => "non-sagex",
@@ -70,7 +70,7 @@ pub struct ImportReport {
 
 impl ImportReport {
   pub fn print(&self) {
-    println!("Catalogue construit : {} projets, {} activités, {} tâches.", self.projects, self.activities, self.presets);
+    println!("Catalog built: {} projects, {} activities, {} tasks.", self.projects, self.activities, self.presets);
     for note in &self.notes {
       println!("  · {note}");
     }
@@ -80,12 +80,12 @@ impl ImportReport {
   }
 }
 
-/// Convertit un `sagex-rs.ron` en catalogue, et complète les réglages.
+/// Converts a `sagex-rs.ron` into a catalog, and fills in the settings.
 pub fn convert(ron_source: &str, settings: &mut Settings) -> Result<(Catalog, ImportReport)> {
-  let config: RonConfig = ron::from_str(ron_source).context("lecture du sagex-rs.ron")?;
+  let config: RonConfig = ron::from_str(ron_source).context("reading sagex-rs.ron")?;
   let mut report = ImportReport::default();
 
-  // -- réglages issus du RON ------------------------------------------------
+  // -- settings from the RON -----------------------------------------------
   if config.sagex_employee_number != 0 {
     settings.employee_number = config.sagex_employee_number;
   }
@@ -101,14 +101,14 @@ pub fn convert(ron_source: &str, settings: &mut Settings) -> Result<(Catalog, Im
     settings.toggl.workspace = config.toggl_workspace.clone();
   }
 
-  // -- activités ------------------------------------------------------------
-  // On part de `sagex_activities` (la liste de référence), puis on ajoute
-  // celles que seuls les projets mentionnent.
+  // -- activities -----------------------------------------------------------
+  // Start from `sagex_activities` (the reference list), then add the ones
+  // only the projects mention.
   let mut activity_names: BTreeMap<u32, String> = BTreeMap::new();
   for (name, number) in &config.sagex_activities {
     activity_names.insert(*number, name.clone());
   }
-  // Ordre déterministe : on trie les clients et projets avant de parcourir.
+  // Deterministic order: clients and projects are sorted before the walk.
   let clients: BTreeMap<&String, BTreeMap<&String, &((u32, String), (u32, String))>> = config
     .projects
     .iter()
@@ -123,7 +123,7 @@ pub fn convert(ron_source: &str, settings: &mut Settings) -> Result<(Catalog, Im
         }
         Some(known) if known != activity_name => {
           report.warnings.push(format!(
-            "activité {activity_number} nommée « {known} » dans sagex_activities et « {activity_name} » pour {client}/{project} — « {known} » retenu"
+            "activity {activity_number} is named \"{known}\" in sagex_activities and \"{activity_name}\" for {client}/{project}; \"{known}\" kept"
           ));
         }
         Some(_) => {}
@@ -148,13 +148,13 @@ pub fn convert(ron_source: &str, settings: &mut Settings) -> Result<(Catalog, Im
     });
   }
 
-  // -- projets --------------------------------------------------------------
+  // -- projects -------------------------------------------------------------
   let mut project_names: BTreeMap<u32, String> = BTreeMap::new();
   for (client, projects) in &clients {
     for (project, ((number, name), _)) in projects {
       match project_names.get(number) {
         Some(known) if known != name => report.warnings.push(format!(
-          "projet {number} nommé « {known} » et « {name} » (pour {client}/{project}) — « {known} » retenu"
+          "project {number} is named \"{known}\" and \"{name}\" (for {client}/{project}); \"{known}\" kept"
         )),
         _ => {
           project_names.entry(*number).or_insert_with(|| name.clone());
@@ -167,7 +167,7 @@ pub fn convert(ron_source: &str, settings: &mut Settings) -> Result<(Catalog, Im
   let mut project_by_number: HashMap<u32, String> = HashMap::new();
   let mut projects = Vec::new();
   for (index, (number, name)) in project_names.iter().enumerate() {
-    // Le numéro 0 est la convention du RON pour « ne pas envoyer dans SageX ».
+    // Number 0 is the RON's convention for "do not send to SageX".
     let (base, name, exportable, note) = if *number == 0 {
       (
         "non-sagex".to_string(),
@@ -193,14 +193,14 @@ pub fn convert(ron_source: &str, settings: &mut Settings) -> Result<(Catalog, Im
 
   if let Some(suspicious) = projects.iter().find(|p| p.exportable && p.name.to_lowercase().contains("non sagex")) {
     report.warnings.push(format!(
-      "le projet {} est nommé « {} » mais son numéro n'est pas nul : il SERA exporté (la directive 2026 y place les absences longue durée) — renomme-le dans la fenêtre de gestion",
+      "project {} is named \"{}\" but its number is not zero: it WILL be exported (the 2026 directive puts long-term absences there); rename it in the Manage window",
       suspicious.sagex_number, suspicious.name
     ));
   }
 
-  // -- tâches (presets) -----------------------------------------------------
-  // Un libellé de projet Toggl peut exister chez plusieurs clients : on ne
-  // préfixe par le client que dans ce cas.
+  // -- tasks (presets) ------------------------------------------------------
+  // A Toggl project label may exist under several clients: only then is it
+  // prefixed with the client.
   let mut label_counts: HashMap<&String, usize> = HashMap::new();
   for projects in clients.values() {
     for project in projects.keys() {
@@ -234,7 +234,7 @@ pub fn convert(ron_source: &str, settings: &mut Settings) -> Result<(Catalog, Im
 
   if !config.toggl_projects_to_ignore.is_empty() {
     report.notes.push(format!(
-      "projets Toggl auparavant ignorés : {} — ils sont désormais rattachés au projet « Non SageX (interne) », donc visibles dans l'app et exclus de l'export",
+      "Toggl projects previously ignored: {}; they now belong to the \"Non SageX (interne)\" project, so they show in the app and stay out of the export",
       config.toggl_projects_to_ignore.join(", ")
     ));
   }
@@ -245,7 +245,7 @@ pub fn convert(ron_source: &str, settings: &mut Settings) -> Result<(Catalog, Im
   Ok((Catalog { projects, activities, presets }, report))
 }
 
-/// Palette lisible en clair comme en sombre.
+/// A palette readable in both light and dark themes.
 fn palette(index: usize) -> String {
   const COLORS: &[&str] = &[
     "#4c78a8", "#f58518", "#54a24b", "#b279a2", "#e45756", "#72b7b2", "#eeca3b", "#9d755d", "#7f7fb3", "#bab0ac",
@@ -292,12 +292,12 @@ mod tests {
     toggl_projects_to_ignore: ["Compensation"],
 )"#;
 
-  /// Petite aide de lecture pour les assertions ci-dessous.
+  /// A small reading aid for the assertions below.
   fn by_number<'a, T>(items: &'a [T], number: u32, field: impl Fn(&'a T) -> &'a String) -> &'a str
   where
     T: HasNumber,
   {
-    field(items.iter().find(|item| item.number() == number).expect("élément présent"))
+    field(items.iter().find(|item| item.number() == number).expect("item present"))
   }
 
   trait HasNumber {
@@ -332,12 +332,12 @@ mod tests {
   #[test]
   fn activities_are_deduplicated_into_a_single_list() {
     let (catalog, _, _) = convert_sample();
-    // 4 activités du RON + « Absence » (3) et le 0 rencontrés dans les projets.
+    // 4 activities from the RON + "Absence" (3) and 0, found in the projects.
     let numbers: Vec<u32> = catalog.activities.iter().map(|a| a.sagex_number).collect();
     assert_eq!(numbers, vec![0, 3, 4, 14, 29]);
     assert_eq!(by_number(&catalog.activities, 29, |a| &a.id), "ra-d");
     assert_eq!(by_number(&catalog.activities, 4, |a| &a.id), "seance");
-    // Chaque activité n'apparaît qu'une fois, quel que soit le nombre de projets.
+    // Each activity appears only once, however many projects use it.
     assert_eq!(catalog.activities.iter().filter(|a| a.sagex_number == 14).count(), 1);
   }
 
@@ -347,7 +347,7 @@ mod tests {
     let non_sagex = catalog.projects.iter().find(|p| p.sagex_number == 0).unwrap();
     assert_eq!(non_sagex.id, "non-sagex");
     assert!(!non_sagex.exportable);
-    // 142259 garde son numéro et reste exportable.
+    // 142259 keeps its number and stays exportable.
     let absences = catalog.projects.iter().find(|p| p.sagex_number == 142259).unwrap();
     assert!(absences.exportable);
   }
@@ -370,7 +370,7 @@ mod tests {
   fn misnamed_exported_project_is_reported() {
     let (_, report, _) = convert_sample();
     assert!(
-      report.warnings.iter().any(|w| w.contains("142259") && w.contains("SERA exporté")),
+      report.warnings.iter().any(|w| w.contains("142259") && w.contains("WILL be exported")),
       "{:?}",
       report.warnings
     );

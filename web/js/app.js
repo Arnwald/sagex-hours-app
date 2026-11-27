@@ -1,8 +1,9 @@
-// Fenêtre principale : navigation, barre des tâches, panneau d'édition,
-// chronomètre, sauvegarde hebdomadaire et rafraîchissement en direct.
+// Main window: navigation, task sidebar, editor panel, timer, weekly
+// backup and live refresh.
 
-import { api, listen, downloadUrl } from './api.js';
-import { MONTH_NAMES, addDays, escapeHtml, hhmm, iso, mondayOf, parseISO, toMinutes, toTime } from './format.js';
+import { adoptInvitation, api, listen, downloadUrl } from './api.js';
+import { addDays, escapeHtml, hhmm, iso, mondayOf, parseISO, toMinutes, toTime } from './format.js';
+import { applyStatic, monthName, monthShort, mountLangSwitch, onLangChange, plural, t } from './i18n.js';
 import { renderWeek, presetDropTarget } from './week.js';
 import { renderMonth } from './month.js';
 
@@ -22,7 +23,7 @@ const state = {
 const el = (id) => document.getElementById(id);
 
 // ---------------------------------------------------------------------------
-// Période affichée
+// Displayed period
 // ---------------------------------------------------------------------------
 
 function range() {
@@ -40,15 +41,18 @@ function monthKey(date = state.anchor) {
 
 function periodLabel() {
   const { from, to } = range();
-  if (state.view === 'month') return `${MONTH_NAMES[from.getMonth()]} ${from.getFullYear()}`;
+  if (state.view === 'month') return t('period.month', { month: monthName(from.getMonth()), year: from.getFullYear() });
   const sameMonth = from.getMonth() === to.getMonth();
   return sameMonth
-    ? `${from.getDate()}–${to.getDate()} ${MONTH_NAMES[from.getMonth()]} ${from.getFullYear()}`
-    : `${from.getDate()} ${MONTH_NAMES[from.getMonth()].slice(0, 4)}. – ${to.getDate()} ${MONTH_NAMES[to.getMonth()].slice(0, 4)}. ${to.getFullYear()}`;
+    ? t('period.week', { from: from.getDate(), to: to.getDate(), month: monthName(from.getMonth()), year: from.getFullYear() })
+    : t('period.weekAcross', {
+      from: from.getDate(), fromMonth: monthShort(from.getMonth()),
+      to: to.getDate(), toMonth: monthShort(to.getMonth()), year: to.getFullYear(),
+    });
 }
 
 // ---------------------------------------------------------------------------
-// Chargement et rendu
+// Loading and rendering
 // ---------------------------------------------------------------------------
 
 let loading = null;
@@ -74,6 +78,7 @@ function render() {
   renderPresets();
   renderTimer();
   renderBackupBanner();
+  renderWho();
 
   el('view-week').hidden = state.view !== 'week';
   el('view-month').hidden = state.view !== 'month';
@@ -87,16 +92,16 @@ function render() {
 }
 
 /**
- * Le panneau doit suivre la saisie qu'il édite : après un glissé, ou une
- * modification venue d'ailleurs, ses champs seraient sinon périmés — et
- * « Enregistrer » réécrirait les anciennes valeurs.
+ * The panel must follow the entry it edits: after a drag, or a change made
+ * elsewhere, its fields would otherwise be stale — and "Save" would write the
+ * old values back.
  */
 function refreshEditor() {
   if (el('editor').hidden || !state.selectedId || state.timerMode) return;
   const entry = state.data.entries.find((e) => e.id === state.selectedId);
   if (!entry) { closeEditor(); return; }
   if (entry.updated_at === state.editorStamp) return;
-  // On ne remplace pas ce qui est en train d'être saisi au clavier.
+  // Don't replace what is being typed.
   if (el('editor').contains(document.activeElement)) return;
   openEditor(entry);
 }
@@ -119,14 +124,23 @@ function days() {
   return out;
 }
 
+/** With several users, whose hours these are: a browser can switch accounts through an invitation link. */
+function renderWho() {
+  const me = state.data.me;
+  el('who').hidden = !me;
+  if (!me) return;
+  el('who').textContent = me.name;
+  el('who').title = t('app.signedIn', { name: me.name });
+}
+
 function renderTotals() {
   const total = state.data.entries.reduce((sum, entry) => sum + entry.minutes, 0);
   const expected = state.view === 'week'
     ? days().filter((day) => !day.weekend && !day.holiday).length * expectedPerDay()
     : null;
   el('totals').innerHTML = `
-    <span>total <b>${hhmm(total)}</b></span>
-    ${expected ? `<span>attendu <b>${hhmm(expected)}</b></span>` : ''}`;
+    <span>${t('totals.total')} <b>${hhmm(total)}</b></span>
+    ${expected ? `<span>${t('totals.expected')} <b>${hhmm(expected)}</b></span>` : ''}`;
 }
 
 function expectedPerDay() {
@@ -160,14 +174,14 @@ function renderPresets() {
         <span class="label">${escapeHtml(preset.label)}</span>
         <span class="meta">${activity?.sagex_number ?? ''}</span>
       </div>`;
-  }).join('') || `<div class="empty">Aucune tâche.<br><a href="/manage" target="sagex-manage">En créer une</a></div>`;
+  }).join('') || `<div class="empty">${t('presets.none')}<br><a href="/manage" target="sagex-manage">${t('presets.create')}</a></div>`;
 
   el('preset-list').querySelectorAll('.preset').forEach((element) => {
     element.addEventListener('pointerdown', (event) => dragPreset(event, element.dataset.id));
   });
 }
 
-/** Clic : ajoute au jour sélectionné. Glissé : dépose à l'heure voulue. */
+/** Click: adds to the selected day. Drag: drops at the time you want. */
 function dragPreset(event, presetId) {
   if (event.button !== 0) return;
   event.preventDefault();
@@ -213,7 +227,7 @@ function dragPreset(event, presetId) {
 }
 
 // ---------------------------------------------------------------------------
-// Contextes des vues
+// View contexts
 // ---------------------------------------------------------------------------
 
 function weekContext() {
@@ -249,7 +263,7 @@ function monthContext() {
 }
 
 // ---------------------------------------------------------------------------
-// Panneau d'édition
+// Editor panel
 // ---------------------------------------------------------------------------
 
 function openEditor(entry, draft = null) {
@@ -266,7 +280,7 @@ function openEditor(entry, draft = null) {
     activity_id: null,
   };
 
-  // Un nouveau bloc reprend la dernière tâche utilisée : c'est presque toujours la bonne.
+  // A new block takes the last task used: it is nearly always the right one.
   if (!entry && state.lastPreset) {
     const preset = catalog().presets.find((p) => p.id === state.lastPreset);
     if (preset) {
@@ -276,10 +290,8 @@ function openEditor(entry, draft = null) {
     }
   }
 
-  el('editor-title').textContent = entry ? 'Modifier la saisie' : 'Nouvelle saisie';
   el('editor-delete').hidden = !entry;
   el('editor-duplicate').hidden = !entry;
-  el('editor-save').textContent = entry ? 'Enregistrer' : 'Ajouter';
 
   fillSelect(el('f-preset'), catalog().presets.filter((p) => !p.archived).map((p) => ({ value: p.id, label: p.label })), '');
   fillSelect(el('f-project'), catalog().projects.filter((p) => !p.archived)
@@ -292,13 +304,30 @@ function openEditor(entry, draft = null) {
   el('f-start').value = source.start ? source.start.slice(0, 5) : '';
   el('f-end').value = source.end ? source.end.slice(0, 5) : (source.start ? toTime(toMinutes(source.start) + source.minutes) : '');
   el('f-duration').value = hhmm(source.minutes);
-  el('editor-hint').textContent = entry
-    ? `${entry.source === 'toggl' ? 'Importée de Toggl. ' : ''}Identifiant ${entry.id}`
-    : 'Laisse les horaires vides pour une saisie sans heure précise.';
 
   state.editorStamp = entry?.updated_at || null;
   el('editor').hidden = false;
+  labelEditor();
   if (!entry) el('f-comment').focus();
+}
+
+/** Texts of the panel that depend on what it edits, in the current language. */
+function labelEditor() {
+  if (el('editor').hidden) return;
+  if (state.timerMode) {
+    el('editor-title').textContent = t('timer.start');
+    el('editor-save').textContent = t('timer.startButton');
+    el('editor-hint').textContent = '';
+    el('f-times').title = t('timer.startHint');
+    return;
+  }
+  const entry = state.selectedId ? state.data.entries.find((e) => e.id === state.selectedId) : null;
+  el('editor-title').textContent = entry ? t('editor.edit') : t('editor.new');
+  el('editor-save').textContent = entry ? t('editor.save') : t('editor.add');
+  el('editor-hint').textContent = entry
+    ? `${entry.source === 'toggl' ? t('editor.fromToggl') : ''}${t('editor.id', { id: entry.id })}`
+    : '';
+  el('f-times').title = t('editor.timesHint');
 }
 
 function closeEditor() {
@@ -316,7 +345,7 @@ function fillSelect(select, options, selected) {
   if (selected) select.value = selected;
 }
 
-/** Les trois champs de temps se complètent mutuellement. */
+/** The three time fields fill each other in. */
 function wireTimeFields() {
   const start = el('f-start'), end = el('f-end'), duration = el('f-duration');
   start.addEventListener('change', () => {
@@ -341,7 +370,7 @@ function wireTimeFields() {
   });
 }
 
-/** « 1h30 » ou « 90 » → minutes (le serveur reste l'autorité). */
+/** "1h30" or "90" → minutes (the server remains the authority). */
 function parseDuration(text) {
   const match = String(text).trim().match(/^(\d+(?:[.,]\d+)?)\s*h\s*(\d+)?$/i);
   if (match) return Math.round(parseFloat(match[1].replace(',', '.')) * 60) + Number(match[2] || 0);
@@ -376,7 +405,7 @@ async function saveEditor() {
         comment: el('f-comment').value,
         started_at: el('f-start').value || null,
       });
-      toast('Chronomètre démarré.');
+      toast(t('timer.started'));
     } else if (state.selectedId) {
       await api.updateEntry(state.selectedId, editorPayload());
     } else {
@@ -399,35 +428,35 @@ async function createEntry(payload) {
 }
 
 // ---------------------------------------------------------------------------
-// Menu d'un jour : duplication et effacement
+// Day menu: duplicating and clearing
 // ---------------------------------------------------------------------------
 
 async function dayMenu(date) {
   const day = days().find((d) => d.date === date);
   const count = day?.entries.length || 0;
   const choice = window.prompt(
-    `${date} — ${count} saisie(s), ${hhmm(day?.minutes || 0)}.\n\n` +
-    `1 · dupliquer ce jour vers une autre date\n` +
-    `2 · dupliquer cette semaine vers une autre semaine\n` +
-    `3 · vider ce jour\n\n` +
-    `Numéro de l'action :`, '1');
+    `${t('day.summary', { date, entries: plural('entries.count', count), duration: hhmm(day?.minutes || 0) })}\n\n` +
+    `${t('day.copyDay')}\n` +
+    `${t('day.copyWeek')}\n` +
+    `${t('day.clear')}\n\n` +
+    t('day.choose'), '1');
   if (!choice) return;
 
   try {
     if (choice.trim() === '1') {
-      const target = window.prompt('Date de destination (AAAA-MM-JJ) :', iso(addDays(parseISO(date), 1)));
+      const target = window.prompt(t('day.targetDate'), iso(addDays(parseISO(date), 1)));
       if (!target) return;
       const result = await api.copy({ mode: 'day', source: date, target, replace: false });
-      toast(`${result.created} saisie(s) copiée(s) vers ${target}.`);
+      toast(plural('day.copiedTo', result.created, { target }));
     } else if (choice.trim() === '2') {
-      const target = window.prompt('Une date de la semaine de destination :', iso(addDays(parseISO(date), 7)));
+      const target = window.prompt(t('day.targetWeek'), iso(addDays(parseISO(date), 7)));
       if (!target) return;
       const result = await api.copy({ mode: 'week', source: date, target, skip_weekend: true });
-      toast(`${result.created} saisie(s) copiée(s).`);
+      toast(plural('day.copied', result.created));
     } else if (choice.trim() === '3') {
-      if (!confirm(`Supprimer les ${count} saisie(s) du ${date} ?`)) return;
+      if (!confirm(plural('day.confirmClear', count, { date }))) return;
       const result = await api.clear({ from: date });
-      toast(`${result.deleted} saisie(s) supprimée(s).`);
+      toast(plural('day.cleared', result.deleted));
     } else return;
     await load();
   } catch (error) {
@@ -436,7 +465,7 @@ async function dayMenu(date) {
 }
 
 // ---------------------------------------------------------------------------
-// Chronomètre
+// Timer
 // ---------------------------------------------------------------------------
 
 let timerTick = null;
@@ -446,14 +475,14 @@ function renderTimer() {
   const box = el('timer');
   box.classList.toggle('running', Boolean(timer));
   el('timer-toggle').textContent = timer ? '■' : '▶';
-  el('timer-toggle').title = timer ? 'Arrêter et enregistrer' : 'Démarrer un chronomètre';
+  el('timer-toggle').title = timer ? t('timer.stop') : t('timer.start');
 
   const paint = () => {
     if (!state.data.timer) { box.querySelector('.elapsed').textContent = '—'; return; }
     const started = new Date(state.data.timer.started_at);
     const minutes = Math.max(0, Math.round((Date.now() - started.getTime()) / 60000));
     const label = catalog().presets.find((p) => p.project_id === state.data.timer.project_id)?.label;
-    box.querySelector('.elapsed').textContent = `${hhmm(minutes)} · ${state.data.timer.comment || label || 'en cours'}`;
+    box.querySelector('.elapsed').textContent = `${hhmm(minutes)} · ${state.data.timer.comment || label || t('timer.running')}`;
   };
 
   clearInterval(timerTick);
@@ -465,14 +494,12 @@ async function toggleTimer() {
   try {
     if (state.data.timer) {
       const result = await api.stopTimer({ round_to: 5 });
-      toast(result.discarded ? 'Chronomètre abandonné.' : `Saisie de ${hhmm(result.entries[0].minutes)} enregistrée.`);
+      toast(result.discarded ? t('timer.discarded') : t('timer.saved', { duration: hhmm(result.entries[0].minutes) }));
       await load();
     } else {
       openEditor(null, { date: state.data.today });
       state.timerMode = true;
-      el('editor-title').textContent = 'Démarrer un chronomètre';
-      el('editor-save').textContent = 'Démarrer';
-      el('editor-hint').textContent = "L'heure de début est facultative : par défaut, maintenant.";
+      labelEditor();
     }
   } catch (error) {
     toast(error.message, true);
@@ -480,7 +507,7 @@ async function toggleTimer() {
 }
 
 // ---------------------------------------------------------------------------
-// Sauvegarde hebdomadaire
+// Weekly backup
 // ---------------------------------------------------------------------------
 
 const SNOOZE_KEY = 'sagex-backup-snooze';
@@ -496,12 +523,12 @@ function renderBackupBanner() {
   el('backup-banner').hidden = !due;
   if (!due) return;
   el('backup-text').textContent = last
-    ? `Dernière sauvegarde il y a ${age} jour(s).`
-    : `Aucune sauvegarde de la base pour l'instant.`;
+    ? plural('backup.age', age)
+    : t('backup.none');
 }
 
 // ---------------------------------------------------------------------------
-// Divers
+// Miscellaneous
 // ---------------------------------------------------------------------------
 
 let toastTimer = null;
@@ -544,7 +571,7 @@ function wire() {
   el('editor-close').addEventListener('click', closeEditor);
   el('editor-save').addEventListener('click', saveEditor);
   el('editor-delete').addEventListener('click', async () => {
-    if (!state.selectedId || !confirm('Supprimer cette saisie ?')) return;
+    if (!state.selectedId || !confirm(t('editor.confirmDelete'))) return;
     try { await api.deleteEntry(state.selectedId); closeEditor(); await load(); }
     catch (error) { toast(error.message, true); }
   });
@@ -553,7 +580,7 @@ function wire() {
       await api.createEntry({ ...editorPayload(), source: 'manual' });
       closeEditor();
       await load();
-      toast('Saisie dupliquée.');
+      toast(t('editor.duplicated'));
     } catch (error) { toast(error.message, true); }
   });
   wireTimeFields();
@@ -581,9 +608,16 @@ function wire() {
     if (event.key === 'm') setView('month');
   });
 
-  // Une modification de la base — par l'API, par Claude ou à la main — revient ici.
+  // A change to the database — through the API, by Claude or by hand — comes back here.
   listen(() => load());
+
+  mountLangSwitch(el('lang-switch'));
+  onLangChange(() => { render(); labelEditor(); });
 }
 
-wire();
-load();
+applyStatic(document);
+// The key of an invitation link is kept before anything is asked of the server.
+adoptInvitation().finally(() => {
+  wire();
+  load();
+});

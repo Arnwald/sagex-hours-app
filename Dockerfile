@@ -1,11 +1,12 @@
-# Image en deux temps : compilation, puis un binaire unique avec l'interface
-# embarquée (rust-embed intègre le dossier web/ en build --release).
+# Two stages: compile, then a single binary with the interface and the Claude
+# Desktop extension embedded (rust-embed bundles web/ in --release builds).
 
 FROM rust:1-bookworm AS builder
 WORKDIR /build
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY web ./web
+COPY mcpb ./mcpb
 RUN cargo build --release --locked
 
 FROM debian:bookworm-slim

@@ -1,4 +1,4 @@
-//! `settings.json` : identité du collaborateur, règles de calcul, options d'export.
+//! `settings.json`: the employee's identity, calculation rules, export options.
 
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
@@ -6,25 +6,25 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
-  /// « N° Interne Collaborateur » (SageX → Paramètres).
+  /// "N° Interne Collaborateur" (SageX → Paramètres).
   pub employee_number: u32,
-  /// « I_PERSONNE » (SageX → Paramètres).
+  /// "I_PERSONNE" (SageX → Paramètres).
   pub person_number: u64,
-  /// N° école, 1 pour la HES-SO Valais.
+  /// School number, 1 for HES-SO Valais.
   pub school_number: u32,
-  /// Taux d'activité, 1.0 = 100 %.
+  /// Activity rate, 1.0 = 100 %.
   pub activity_rate: f64,
-  /// Imputation moyenne pour un 100 %, `"HH:MM"`. 8h12 selon la directive 2026.
+  /// Average daily hours for a 100 % rate, `"HH:MM"`. 8h12 per the 2026 directive.
   pub hours_per_day: String,
-  /// Jours fériés supplémentaires ou de remplacement (les fériés valaisans sont calculés).
+  /// Extra or substitute public holidays (Valais holidays are computed).
   #[serde(default)]
   pub extra_holidays: Vec<NaiveDate>,
-  /// Désactive le calcul automatique des fériés valaisans.
+  /// Turns off the automatic computation of Valais public holidays.
   pub compute_holidays: bool,
   pub export: ExportSettings,
   pub toggl: TogglSettings,
   pub ui: UiSettings,
-  /// Date de la dernière sauvegarde complète téléchargée.
+  /// Date of the last full backup downloaded.
   #[serde(skip_serializing_if = "Option::is_none")]
   pub last_backup: Option<NaiveDate>,
 }
@@ -33,45 +33,45 @@ pub struct Settings {
 #[serde(default)]
 pub struct ExportSettings {
   pub aggregate: Aggregate,
-  /// Mise en forme de la colonne « Commentaire » lors d'une agrégation.
+  /// How the "Commentaire" column is laid out when aggregating.
   pub comment_style: CommentStyle,
-  /// Format des dates préfixant chaque commentaire agrégé.
+  /// Format of the dates prefixing each aggregated comment.
   pub comment_date_format: String,
   pub comment_separator: String,
-  /// La colonne « Commentaire » de SageX est un varchar1000.
+  /// SageX's "Commentaire" column is a varchar1000.
   pub comment_max_len: usize,
   pub header: Vec<String>,
-  /// Nom du fichier produit, `{from}` et `{to}` sont remplacés.
+  /// Name of the produced file; `{from}` and `{to}` are substituted.
   pub file_name: String,
 }
 
-/// Comment condenser les descriptions regroupées sur une même ligne.
+/// How to condense the descriptions grouped on one line.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CommentStyle {
-  /// Une mention par saisie : `« 30.07.2026 - Daily | 29.07.2026 - Daily »`.
+  /// One mention per entry: `"30.07.2026 - Daily | 29.07.2026 - Daily"`.
   Detailed,
-  /// Descriptions identiques regroupées : `« Daily (2× : 30.07, 29.07) »`.
+  /// Identical descriptions grouped: `"Daily (2× : 30.07, 29.07)"`.
   Compact,
-  /// Détaillé, et compacté seulement si la limite varchar1000 est dépassée.
+  /// Detailed, compacted only when the varchar1000 limit is exceeded.
   Auto,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Aggregate {
-  /// Une ligne par (projet, activité) et par mois, datée du dernier jour du mois.
+  /// One line per (project, activity) and month, dated the last day of the month.
   Month,
-  /// Une ligne par (projet, activité) et par jour.
+  /// One line per (project, activity) and day.
   Day,
-  /// Une ligne par saisie.
+  /// One line per entry.
   None,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TogglSettings {
-  /// Peut aussi être fourni par la variable d'environnement `TOGGL_API_TOKEN`.
+  /// Can also be given by the `TOGGL_API_TOKEN` environment variable.
   #[serde(skip_serializing_if = "Option::is_none")]
   pub api_token: Option<String>,
   #[serde(skip_serializing_if = "Option::is_none")]
@@ -81,14 +81,14 @@ pub struct TogglSettings {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct UiSettings {
-  /// Première heure affichée dans la grille de la semaine.
+  /// First hour shown in the week grid.
   pub day_start_hour: u32,
   pub day_end_hour: u32,
-  /// Pas de la grille, en minutes.
+  /// Grid step, in minutes.
   pub slot_minutes: u32,
-  /// Durée par défaut d'une entrée créée en un clic.
+  /// Default duration of an entry created with one click.
   pub default_minutes: u32,
-  /// Rappel de sauvegarde après N jours sans backup.
+  /// Backup reminder after N days without a backup.
   pub backup_reminder_days: i64,
 }
 
@@ -118,7 +118,7 @@ impl Default for ExportSettings {
       comment_date_format: "%d.%m.%Y".to_string(),
       comment_separator: " | ".to_string(),
       comment_max_len: 1000,
-      // Ces libellés sont ceux attendus par l'importeur SageX : ne pas traduire.
+      // These labels are what SageX's importer expects: do not translate them.
       header: vec![
         "N° école (number5)".to_string(),
         "N° Interne Collaborateur (number 5)".to_string(),
@@ -148,7 +148,7 @@ impl Default for UiSettings {
 }
 
 impl Settings {
-  /// Imputation quotidienne attendue, en minutes, taux d'activité appliqué.
+  /// Expected daily hours, in minutes, with the activity rate applied.
   pub fn expected_minutes_per_day(&self) -> u32 {
     let base = crate::model::opt_hhmm::parse_hhmm(&self.hours_per_day)
       .map(|t| chrono::Timelike::hour(&t) * 60 + chrono::Timelike::minute(&t))
@@ -156,7 +156,7 @@ impl Settings {
     (base as f64 * self.activity_rate).round() as u32
   }
 
-  /// Token Toggl effectif : variable d'environnement prioritaire sur le fichier.
+  /// Effective Toggl token: the environment variable takes precedence over the file.
   pub fn toggl_token(&self) -> Option<String> {
     std::env::var("TOGGL_API_TOKEN").ok().filter(|t| !t.is_empty()).or_else(|| self.toggl.api_token.clone())
   }
@@ -179,7 +179,7 @@ mod tests {
 
   #[test]
   fn settings_file_is_forward_compatible() {
-    // Un fichier partiel écrit à la main doit rester lisible.
+    // A partial, hand-written file must stay readable.
     let s: Settings = serde_json::from_str(r#"{"employee_number": 351339}"#).unwrap();
     assert_eq!(s.employee_number, 351339);
     assert_eq!(s.school_number, 1);

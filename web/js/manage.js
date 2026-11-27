@@ -1,11 +1,16 @@
 // Secondary window: managing the three lists and the settings.
 
-import { api, listen, downloadUrl } from './api.js';
+import { adoptInvitation, api, copyText, downloadUrl, listen, setToken, token } from './api.js';
 import { escapeHtml } from './format.js';
 import { applyStatic, mountLangSwitch, onLangChange, plural, t } from './i18n.js';
 
 let catalog = { projects: [], activities: [], presets: [] };
 let settings = null;
+/** The caller and the kind of instance (`/api/me`). */
+let me = null;
+let users = [];
+/** The invitation link just made, shown once: `{ name, link }`. */
+let invitation = null;
 let tab = 'projects';
 /**
  * Message of the last restore, as a function so it follows the language: the
@@ -16,7 +21,10 @@ let notice = () => '';
 const panel = () => document.getElementById('panel');
 
 async function load() {
-  [catalog, settings] = await Promise.all([api.catalog(), api.settings()]);
+  [catalog, settings, me] = await Promise.all([api.catalog(), api.settings(), api.me()]);
+  users = me.admin && me.multi_user ? await api.users() : [];
+  document.querySelector('[data-tab="users"]').hidden = !me.admin;
+  if (tab === 'users' && !me.admin) tab = 'projects';
   render();
 }
 
@@ -26,7 +34,167 @@ function render() {
   if (tab === 'projects') renderProjects();
   else if (tab === 'activities') renderActivities();
   else if (tab === 'presets') renderPresets();
+  else if (tab === 'claude') renderClaude();
+  else if (tab === 'users') renderUsers();
   else renderSettings();
+}
+
+// ---------------------------------------------------------------------------
+// Claude
+
+function renderClaude() {
+  const origin = window.location.origin;
+  const key = token();
+  const command = (shown) => `claude mcp add --transport http --scope user sagex-hours ${origin}/mcp`
+    + (key ? ` --header "Authorization: Bearer ${shown}"` : '');
+  // The key stays hidden on screen (a shared screen…), the copy has it whole.
+  const masked = key ? `${key.slice(0, 4)}…` : '';
+
+  panel().innerHTML = `
+    <div class="panel">
+      <h2 title="${escapeHtml(t('claude.desktopHint'))}">${t('claude.desktop')}</h2>
+      <div class="body row" style="align-items:center">
+        <button class="primary" id="extension" style="flex:0 0 auto">${t('claude.download')}</button>
+        <span class="hint">${t('claude.desktopNext')}</span>
+      </div>
+    </div>
+    <div class="panel">
+      <h2 title="${escapeHtml(t('claude.codeHint'))}">${t('claude.code')}</h2>
+      <div class="body">
+        <div class="command"><code>${escapeHtml(command(masked))}</code>
+          <button id="copy-command">${t('claude.copy')}</button></div>
+      </div>
+    </div>`;
+
+  document.getElementById('extension').addEventListener('click', () => {
+    window.location.href = downloadUrl(`/api/claude/sagex-hours.mcpb?base=${encodeURIComponent(origin)}`);
+  });
+  wireCopy(document.getElementById('copy-command'), () => command(key));
+}
+
+/** A copy button that says it copied. */
+function wireCopy(button, text) {
+  button.addEventListener('click', async () => {
+    try {
+      await copyText(text());
+      button.textContent = t('claude.copied');
+      setTimeout(() => { button.textContent = t('claude.copy'); }, 1500);
+    } catch (error) {
+      alert(error.message);
+    }
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Users (administrators)
+
+function renderUsers() {
+  if (!me.multi_user) {
+    panel().innerHTML = `
+      <div class="panel">
+        <h2 title="${escapeHtml(t('users.enableHint'))}">${t('manage.tabUsers')}</h2>
+        <div class="body">
+          <p class="hint" style="margin-top:0">${t('users.single')}</p>
+          <div class="row" style="align-items:flex-end">
+            <div class="field" style="margin:0"><label for="admin-name">${t('users.yourName')}</label>
+              <input id="admin-name" placeholder="${escapeHtml(t('users.namePlaceholder'))}"></div>
+            <button class="primary" id="enable" style="flex:0 0 auto">${t('users.enable')}</button>
+          </div>
+        </div>
+      </div>`;
+    document.getElementById('enable').addEventListener('click', async () => {
+      const name = document.getElementById('admin-name').value.trim();
+      if (!name || !confirm(t('users.confirmEnable', { name }))) return;
+      try {
+        const result = await api.enableUsers({ name });
+        // Unchanged when the instance had a key; new for an open instance.
+        setTokenAndReload(result.key);
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+    return;
+  }
+
+  const link = invitation ? `
+    <div class="panel">
+      <h2 title="${escapeHtml(t('users.linkHint'))}">${t('users.link', { name: escapeHtml(invitation.name) })}</h2>
+      <div class="body"><div class="command"><code>${escapeHtml(invitation.link)}</code>
+        <button id="copy-link">${t('claude.copy')}</button></div></div>
+    </div>` : '';
+
+  panel().innerHTML = `${link}
+    <div class="panel">
+      <h2>${t('manage.tabUsers')}<span class="spacer"></span>
+        <span class="hint">${plural('users.count', users.length)}</span></h2>
+      <table>
+        <thead><tr><th>${t('manage.colName')}</th><th style="width:120px">${t('users.colCreated')}</th>
+          <th style="width:230px"></th></tr></thead>
+        <tbody>
+          ${users.map((user) => {
+            const self = me.user && me.user.id === user.id;
+            return `<tr data-user="${escapeHtml(user.id)}" data-name="${escapeHtml(user.name)}">
+              <td>${escapeHtml(user.name)}${user.admin ? `<span class="badge-admin">${t('users.admin')}</span>` : ''}
+                ${self ? `<span class="hint">${t('users.you')}</span>` : ''}<div class="id">${escapeHtml(user.id)}</div></td>
+              <td class="hint">${escapeHtml(user.created_at.slice(0, 10))}</td>
+              <td style="text-align:right">
+                <button class="ghost" data-renew title="${escapeHtml(t('users.newLinkHint'))}">${t('users.newLink')}</button>
+                ${self ? '' : `<button class="ghost danger" data-remove>${t('users.remove')}</button>`}
+              </td>
+            </tr>`;
+          }).join('')}
+          <tr class="add-row">
+            <td><input id="new-user" placeholder="${escapeHtml(t('users.namePlaceholder'))}"></td>
+            <td><label class="hint" title="${escapeHtml(t('users.withProjectsHint'))}" style="white-space:nowrap">
+              <input id="with-projects" type="checkbox" style="width:auto"> ${t('users.withProjects')}</label></td>
+            <td style="text-align:right"><button class="primary" id="add-user">${t('manage.add')}</button></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>`;
+
+  if (invitation) wireCopy(document.getElementById('copy-link'), () => invitation.link);
+
+  document.getElementById('add-user').addEventListener('click', async () => {
+    const name = document.getElementById('new-user').value.trim();
+    if (!name) return;
+    try {
+      const result = await api.addUser({ name, with_projects: document.getElementById('with-projects').checked });
+      showInvitation(result);
+    } catch (error) {
+      alert(error.message);
+    }
+  });
+
+  panel().querySelectorAll('tr[data-user]').forEach((row) => {
+    const { user: id, name } = row.dataset;
+    row.querySelector('[data-renew]').addEventListener('click', async () => {
+      if (!confirm(t('users.confirmRenew', { name }))) return;
+      try {
+        const result = await api.renewKey(id);
+        // My own new key: this browser keeps working with it.
+        if (me.user && me.user.id === id) setToken(result.key);
+        showInvitation(result);
+      } catch (error) {
+        alert(error.message);
+      }
+    });
+    row.querySelector('[data-remove]')?.addEventListener('click', async () => {
+      if (!confirm(t('users.confirmRemove', { name }))) return;
+      invitation = null;
+      await guard(() => api.removeUser(id));
+    });
+  });
+}
+
+function showInvitation(result) {
+  invitation = { name: result.user.name, link: `${window.location.origin}/#key=${result.key}` };
+  load();
+}
+
+function setTokenAndReload(key) {
+  setToken(key);
+  window.location.reload();
 }
 
 // ---------------------------------------------------------------------------
@@ -347,11 +515,18 @@ async function guard(action) {
 }
 
 document.querySelectorAll('[data-tab]').forEach((button) => {
-  button.addEventListener('click', () => { tab = button.dataset.tab; notice = () => ''; render(); });
+  button.addEventListener('click', () => {
+    tab = button.dataset.tab;
+    notice = () => '';
+    if (tab !== 'users') invitation = null;
+    render();
+  });
 });
 
 applyStatic(document);
 mountLangSwitch(document.getElementById('lang-switch'));
 onLangChange(() => { if (settings) render(); });
-listen(() => load());
-load();
+adoptInvitation().finally(() => {
+  listen(() => load());
+  load();
+});

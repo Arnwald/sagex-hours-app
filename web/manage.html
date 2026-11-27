@@ -22,6 +22,11 @@
     .add-row td { background: var(--surface-2); }
     .page-head { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; }
     .page-head h1 { font-size: 16px; margin: 0; }
+    .command { display: flex; gap: 8px; align-items: center; }
+    .command code { flex: 1; font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--surface-2);
+      border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 9px; white-space: pre-wrap; word-break: break-all; }
+    .command button { flex: 0 0 auto; }
+    .badge-admin { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: var(--accent); margin-left: 6px; }
   </style>
 </head>
 <body>
@@ -40,6 +45,8 @@
     <button data-tab="activities" aria-pressed="false" data-i18n="manage.tabActivities">Activités SageX</button>
     <button data-tab="presets" aria-pressed="false" data-i18n="manage.tabPresets">Tâches</button>
     <button data-tab="settings" aria-pressed="false" data-i18n="manage.tabSettings">Réglages</button>
+    <button data-tab="claude" aria-pressed="false" data-i18n="manage.tabClaude">Claude</button>
+    <button data-tab="users" aria-pressed="false" data-i18n="manage.tabUsers" hidden>Utilisateurs</button>
   </div>
 
   <div id="panel"></div>

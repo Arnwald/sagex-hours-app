@@ -55,7 +55,55 @@ export const api = {
   createItem: (kind, item) => request('POST', `/api/catalog/${kind}`, item),
   updateItem: (kind, id, patch) => request('PATCH', `/api/catalog/${kind}/${id}`, patch),
   deleteItem: (kind, id, force = false) => request('DELETE', `/api/catalog/${kind}/${id}?force=${force}`),
+  me: () => request('GET', '/api/me'),
+  users: () => request('GET', '/api/admin/users'),
+  addUser: (user) => request('POST', '/api/admin/users', user),
+  renewKey: (id) => request('POST', `/api/admin/users/${encodeURIComponent(id)}/key`),
+  removeUser: (id) => request('DELETE', `/api/admin/users/${encodeURIComponent(id)}`),
+  enableUsers: (payload) => request('POST', '/api/admin/enable-users', payload),
 };
+
+/** The person a key opens, or null. */
+async function whoIs(key) {
+  try {
+    const response = await fetch('/api/me', { headers: { 'X-Auth-Token': key, 'Accept-Language': lang() } });
+    return response.ok ? (await response.json()).user : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * An invitation link (`…/#key=…`) brings a personal key: keep it, and take it
+ * out of the address. A browser already set up for someone else asks first.
+ */
+export async function adoptInvitation() {
+  const match = window.location.hash.match(/[#&]key=([^&]+)/);
+  if (!match) return;
+  history.replaceState(null, '', window.location.pathname + window.location.search);
+  const key = decodeURIComponent(match[1]).replace(/\s+/g, '');
+  const current = token();
+  if (!key || key === current) return;
+  if (current) {
+    const [before, after] = await Promise.all([whoIs(current), whoIs(key)]);
+    if (before && after && before.id !== after.id && !window.confirm(t('api.switchUser', { from: before.name, to: after.name }))) return;
+  }
+  setToken(key);
+}
+
+/** The clipboard, also over plain HTTP (an address on the VPN), where `navigator.clipboard` is missing. */
+export async function copyText(text) {
+  if (window.isSecureContext && navigator.clipboard) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const area = document.createElement('textarea');
+  area.value = text;
+  area.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+  document.body.appendChild(area);
+  area.select();
+  try { document.execCommand('copy'); } finally { area.remove(); }
+}
 
 /** URL of a download, with the interface language and the token if one is needed. */
 export function downloadUrl(path) {

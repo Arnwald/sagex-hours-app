@@ -1,7 +1,7 @@
 // Main window: navigation, task sidebar, editor panel, timer, weekly
 // backup and live refresh.
 
-import { api, listen, downloadUrl } from './api.js';
+import { adoptInvitation, api, listen, downloadUrl } from './api.js';
 import { addDays, escapeHtml, hhmm, iso, mondayOf, parseISO, toMinutes, toTime } from './format.js';
 import { applyStatic, monthName, monthShort, mountLangSwitch, onLangChange, plural, t } from './i18n.js';
 import { renderWeek, presetDropTarget } from './week.js';
@@ -78,6 +78,7 @@ function render() {
   renderPresets();
   renderTimer();
   renderBackupBanner();
+  renderWho();
 
   el('view-week').hidden = state.view !== 'week';
   el('view-month').hidden = state.view !== 'month';
@@ -121,6 +122,15 @@ function days() {
     });
   }
   return out;
+}
+
+/** With several users, whose hours these are: a browser can switch accounts through an invitation link. */
+function renderWho() {
+  const me = state.data.me;
+  el('who').hidden = !me;
+  if (!me) return;
+  el('who').textContent = me.name;
+  el('who').title = t('app.signedIn', { name: me.name });
 }
 
 function renderTotals() {
@@ -606,5 +616,8 @@ function wire() {
 }
 
 applyStatic(document);
-wire();
-load();
+// The key of an invitation link is kept before anything is asked of the server.
+adoptInvitation().finally(() => {
+  wire();
+  load();
+});

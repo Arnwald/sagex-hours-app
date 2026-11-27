@@ -38,6 +38,7 @@ const STRINGS = {
     // Main window: top bar
     'app.title': 'Heures SageX',
     'app.brand': 'Heures <small>SageX</small>',
+    'app.signedIn': 'Connecté : {name}',
     'nav.view': 'Vue',
     'nav.week': 'Semaine',
     'nav.month': 'Mois',
@@ -236,10 +237,44 @@ const STRINGS = {
     'manage.failed': 'Échec : {message}',
     'manage.confirmDelete': 'Supprimer définitivement cet élément ?',
     'manage.deleteAnyway': 'Supprimer quand même ?',
+    'manage.tabClaude': 'Claude',
+    'manage.tabUsers': 'Utilisateurs',
+
+    // Claude
+    'claude.desktop': 'Claude Desktop',
+    'claude.desktopHint': "Une extension faite pour toi : Claude Desktop l'exécute avec son propre Node.js, rien d'autre à installer. Cet ordinateur doit joindre le serveur (VPN). Elle contient ta clé personnelle : ne la transmets pas.",
+    'claude.download': "Télécharger l'extension",
+    'claude.desktopNext': 'Puis double-clic sur sagex-hours.mcpb › Installer.',
+    'claude.code': 'Claude Code',
+    'claude.codeHint': 'À coller une fois dans un terminal : Claude Code se connecte directement au serveur, dans tous tes projets. Cet ordinateur doit joindre le serveur (VPN).',
+    'claude.copy': 'Copier',
+    'claude.copied': 'Copié',
+
+    // Users
+    'users.count': { one: '{n} utilisateur', other: '{n} utilisateurs' },
+    'users.colCreated': 'Créé le',
+    'users.admin': 'admin',
+    'users.you': '(toi)',
+    'users.newLink': 'Nouveau lien',
+    'users.newLinkHint': "Une nouvelle clé : l'ancien lien et l'ancienne extension Claude cessent de fonctionner.",
+    'users.confirmRenew': "Donner une nouvelle clé à {name} ? L'ancien lien et l'ancienne extension Claude cesseront de fonctionner.",
+    'users.remove': 'Retirer',
+    'users.confirmRemove': 'Retirer {name} ? Sa clé cesse de fonctionner ; son dossier reste sur le serveur.',
+    'users.namePlaceholder': 'Prénom Nom',
+    'users.withProjects': 'avec mes projets',
+    'users.withProjectsHint': 'La nouvelle base reprend toujours tes activités SageX ; cochée, elle reprend aussi tes projets. Les tâches restent personnelles.',
+    'users.link': "Lien d'invitation pour {name}",
+    'users.linkHint': "À envoyer à la personne : il ouvre ses heures et garde sa clé dans son navigateur. Affiché une seule fois. Ne l'ouvre pas toi-même : ton navigateur passerait sur son compte.",
+    'users.single': 'Une seule base sur cette instance.',
+    'users.yourName': 'Ton nom',
+    'users.enable': 'Activer plusieurs utilisateurs',
+    'users.enableHint': "Ta base actuelle devient ton espace, administrateur ; ta clé actuelle reste valable. Tu crées ensuite un espace pour chaque collègue et lui envoies un lien.",
+    'users.confirmEnable': 'Activer plusieurs utilisateurs ? La base actuelle devient celle de {name}, administrateur.',
 
     // API access
     'api.tokenPrompt': "Cette instance demande un jeton d'accès :",
     'api.tokenRequired': "jeton d'accès requis",
+    'api.switchUser': 'Ce lien ouvre les heures de {to}. Ce navigateur est actuellement celui de {from}. Changer ?',
   },
 
   en: {
@@ -249,6 +284,7 @@ const STRINGS = {
 
     'app.title': 'SageX Hours',
     'app.brand': 'Hours <small>SageX</small>',
+    'app.signedIn': 'Signed in as {name}',
     'nav.view': 'View',
     'nav.week': 'Week',
     'nav.month': 'Month',
@@ -439,9 +475,43 @@ const STRINGS = {
     'manage.failed': 'Failed: {message}',
     'manage.confirmDelete': 'Delete this item permanently?',
     'manage.deleteAnyway': 'Delete anyway?',
+    'manage.tabClaude': 'Claude',
+    'manage.tabUsers': 'Users',
+
+    // Claude
+    'claude.desktop': 'Claude Desktop',
+    'claude.desktopHint': 'An extension made for you: Claude Desktop runs it with its own Node.js, nothing else to install. This computer must reach the server (VPN). It holds your personal key: don’t pass it on.',
+    'claude.download': 'Download the extension',
+    'claude.desktopNext': 'Then double-click sagex-hours.mcpb › Install.',
+    'claude.code': 'Claude Code',
+    'claude.codeHint': 'Paste it once in a terminal: Claude Code connects straight to the server, in all your projects. This computer must reach the server (VPN).',
+    'claude.copy': 'Copy',
+    'claude.copied': 'Copied',
+
+    // Users
+    'users.count': { one: '{n} user', other: '{n} users' },
+    'users.colCreated': 'Created',
+    'users.admin': 'admin',
+    'users.you': '(you)',
+    'users.newLink': 'New link',
+    'users.newLinkHint': 'A new key: the old link and the old Claude extension stop working.',
+    'users.confirmRenew': 'Give {name} a new key? The old link and the old Claude extension will stop working.',
+    'users.remove': 'Remove',
+    'users.confirmRemove': 'Remove {name}? Their key stops working; their folder stays on the server.',
+    'users.namePlaceholder': 'First Last',
+    'users.withProjects': 'with my projects',
+    'users.withProjectsHint': 'The new base always starts from your SageX activities; ticked, from your projects too. Tasks stay personal.',
+    'users.link': 'Invitation link for {name}',
+    'users.linkHint': 'Send it to them: it opens their hours and keeps their key in their browser. Shown only once. Don’t open it yourself: your browser would switch to their account.',
+    'users.single': 'One base on this instance.',
+    'users.yourName': 'Your name',
+    'users.enable': 'Enable several users',
+    'users.enableHint': 'Your current base becomes your space, as administrator; your current key stays valid. You then create a space for each colleague and send them a link.',
+    'users.confirmEnable': 'Enable several users? The current base becomes {name}’s, as administrator.',
 
     'api.tokenPrompt': 'This instance needs an access token:',
     'api.tokenRequired': 'access token required',
+    'api.switchUser': 'This link opens the hours of {to}. This browser is currently set up for {from}. Switch?',
   },
 };
 

@@ -97,6 +97,7 @@ textarea { resize: vertical; min-height: 54px; }
 .segmented button { border: none; background: none; padding: 4px 12px; }
 .segmented button[aria-pressed="true"] { background: var(--surface); box-shadow: var(--shadow); color: var(--accent); }
 .lang-switch button { padding: 4px 8px; font-size: 11px; font-weight: 600; letter-spacing: .04em; }
+.who { color: var(--text-dim); font-size: 12px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .totals { display: flex; gap: 14px; align-items: baseline; color: var(--text-dim); white-space: nowrap; }
 .totals b { color: var(--text); font-variant-numeric: tabular-nums; font-size: 14px; }

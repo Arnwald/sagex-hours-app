@@ -1,10 +1,9 @@
-//! Accès à la base « en clair ».
+//! Access to the plain-text database.
 //!
-//! Les fichiers JSON sont la source de vérité : chaque lecture relit le disque,
-//! si bien qu'une modification faite à la main (ou par Claude) est prise en
-//! compte immédiatement, sans cache à invalider. Les écritures sont atomiques
-//! (fichier temporaire puis `rename`) et re-trient les entrées pour garder des
-//! diffs lisibles.
+//! The JSON files are the source of truth: every read goes back to disk, so a
+//! change made by hand (or by Claude) is seen at once, with no cache to
+//! invalidate. Writes are atomic (temporary file, then `rename`) and re-sort
+//! the entries to keep diffs readable.
 
 use crate::model::{Catalog, Entry, MonthFile, RunningTimer, YearMonth};
 use crate::settings::Settings;
@@ -13,10 +12,10 @@ use chrono::NaiveDate;
 use std::path::{Path, PathBuf};
 use tokio::sync::broadcast;
 
-/// Évènement diffusé aux navigateurs connectés (SSE).
+/// Event broadcast to connected browsers (SSE).
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct Change {
-  /// `entries`, `catalog`, `settings`, `timer` ou `all`.
+  /// `entries`, `catalog`, `settings`, `timer` or `all`.
   pub scope: String,
   #[serde(skip_serializing_if = "Option::is_none")]
   pub month: Option<String>,
@@ -38,10 +37,10 @@ pub struct Store {
 }
 
 impl Store {
-  /// Ouvre (et initialise si nécessaire) la base dans `root`.
+  /// Opens (and initialises if needed) the database in `root`.
   pub fn open(root: impl AsRef<Path>) -> Result<Self> {
     let root = root.as_ref().to_path_buf();
-    std::fs::create_dir_all(root.join("entries")).with_context(|| format!("création de {}", root.display()))?;
+    std::fs::create_dir_all(root.join("entries")).with_context(|| format!("creating {}", root.display()))?;
     std::fs::create_dir_all(root.join("backups"))?;
     let (tx, _) = broadcast::channel(64);
     let store = Store { root, tx };
@@ -59,7 +58,7 @@ impl Store {
     &self.root
   }
 
-  // -- diffusion ------------------------------------------------------------
+  // -- broadcasting ---------------------------------------------------------
 
   pub fn subscribe(&self) -> broadcast::Receiver<Change> {
     self.tx.subscribe()
@@ -69,7 +68,7 @@ impl Store {
     let _ = self.tx.send(change);
   }
 
-  // -- chemins --------------------------------------------------------------
+  // -- paths ----------------------------------------------------------------
 
   pub fn settings_path(&self) -> PathBuf {
     self.root.join("settings.json")
@@ -97,7 +96,7 @@ impl Store {
     write_json(&self.settings_path(), settings)
   }
 
-  // -- catalogue ------------------------------------------------------------
+  // -- catalog --------------------------------------------------------------
 
   pub fn catalog(&self) -> Result<Catalog> {
     read_json(&self.catalog_path()).map(|c| c.unwrap_or_default())
@@ -107,7 +106,7 @@ impl Store {
     write_json(&self.catalog_path(), catalog)
   }
 
-  // -- chronomètre ----------------------------------------------------------
+  // -- timer ----------------------------------------------------------------
 
   pub fn timer(&self) -> Result<Option<RunningTimer>> {
     read_json(&self.timer_path())
@@ -119,25 +118,25 @@ impl Store {
       None => {
         let path = self.timer_path();
         if path.exists() {
-          std::fs::remove_file(&path).with_context(|| format!("suppression de {}", path.display()))?;
+          std::fs::remove_file(&path).with_context(|| format!("deleting {}", path.display()))?;
         }
         Ok(())
       }
     }
   }
 
-  // -- entrées --------------------------------------------------------------
+  // -- entries --------------------------------------------------------------
 
   pub fn month(&self, month: YearMonth) -> Result<MonthFile> {
     Ok(read_json(&self.month_path(month))?.unwrap_or_else(|| MonthFile::empty(month)))
   }
 
-  /// Écrit un mois. Un mois vide est supprimé plutôt que laissé en place.
+  /// Writes a month. An empty month is deleted rather than left in place.
   pub fn save_month(&self, file: &mut MonthFile) -> Result<()> {
     let path = self.month_path(file.month);
     if file.entries.is_empty() {
       if path.exists() {
-        std::fs::remove_file(&path).with_context(|| format!("suppression de {}", path.display()))?;
+        std::fs::remove_file(&path).with_context(|| format!("deleting {}", path.display()))?;
       }
       return Ok(());
     }
@@ -147,14 +146,14 @@ impl Store {
     write_json(&path, file)
   }
 
-  /// Mois pour lesquels un fichier existe, du plus ancien au plus récent.
+  /// Months for which a file exists, oldest first.
   pub fn months(&self) -> Result<Vec<YearMonth>> {
     let dir = self.root.join("entries");
     let mut out = Vec::new();
     if !dir.exists() {
       return Ok(out);
     }
-    for entry in std::fs::read_dir(&dir).with_context(|| format!("lecture de {}", dir.display()))? {
+    for entry in std::fs::read_dir(&dir).with_context(|| format!("reading {}", dir.display()))? {
       let entry = entry?;
       let name = entry.file_name();
       let name = name.to_string_lossy();
@@ -181,7 +180,7 @@ impl Store {
     Ok(out)
   }
 
-  /// Retrouve une entrée par son identifiant, en partant des mois les plus récents.
+  /// Finds an entry by its identifier, starting from the most recent months.
   pub fn find_entry(&self, id: &str) -> Result<Option<(YearMonth, Entry)>> {
     let mut months = self.months()?;
     months.reverse();
@@ -193,7 +192,7 @@ impl Store {
     Ok(None)
   }
 
-  /// Ajoute des entrées, en les répartissant dans le bon fichier mensuel.
+  /// Adds entries, each to its own month file.
   pub fn insert_entries(&self, entries: Vec<Entry>) -> Result<Vec<Entry>> {
     let mut touched: std::collections::BTreeMap<YearMonth, Vec<Entry>> = Default::default();
     for entry in &entries {
@@ -220,7 +219,7 @@ impl Store {
     Ok(removed)
   }
 
-  /// Remplace une entrée, en la déplaçant de fichier si sa date a changé de mois.
+  /// Replaces an entry, moving it to another file if its date changed month.
   pub fn replace_entry(&self, previous_month: YearMonth, entry: Entry) -> Result<()> {
     let new_month = YearMonth::of(entry.date);
     let mut file = self.month(previous_month)?;
@@ -241,32 +240,32 @@ impl Store {
 }
 
 // ---------------------------------------------------------------------------
-// Entrées/sorties JSON
+// JSON input/output
 // ---------------------------------------------------------------------------
 
-/// Lit un JSON. Retourne `None` si le fichier n'existe pas (ou est vide).
+/// Reads a JSON file. Returns `None` if the file does not exist (or is empty).
 pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<Option<T>> {
   if !path.exists() {
     return Ok(None);
   }
-  let raw = std::fs::read_to_string(path).with_context(|| format!("lecture de {}", path.display()))?;
+  let raw = std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
   if raw.trim().is_empty() {
     return Ok(None);
   }
-  let value = serde_json::from_str(&raw).with_context(|| format!("JSON invalide dans {}", path.display()))?;
+  let value = serde_json::from_str(&raw).with_context(|| format!("invalid JSON in {}", path.display()))?;
   Ok(Some(value))
 }
 
-/// Écriture atomique : fichier temporaire voisin puis `rename`.
+/// Atomic write: a temporary file next to it, then `rename`.
 pub fn write_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<()> {
   if let Some(parent) = path.parent() {
-    std::fs::create_dir_all(parent).with_context(|| format!("création de {}", parent.display()))?;
+    std::fs::create_dir_all(parent).with_context(|| format!("creating {}", parent.display()))?;
   }
   let mut json = serde_json::to_string_pretty(value)?;
   json.push('\n');
   let tmp = path.with_extension("json.tmp");
-  std::fs::write(&tmp, json).with_context(|| format!("écriture de {}", tmp.display()))?;
-  std::fs::rename(&tmp, path).with_context(|| format!("remplacement de {}", path.display()))?;
+  std::fs::write(&tmp, json).with_context(|| format!("writing {}", tmp.display()))?;
+  std::fs::rename(&tmp, path).with_context(|| format!("replacing {}", path.display()))?;
   Ok(())
 }
 
@@ -300,13 +299,13 @@ mod tests {
 
     store.insert_entries(vec![entry("2026-09-16", "b"), entry("2026-09-02", "a"), entry("2026-10-01", "c")]).unwrap();
 
-    // Les entrées sont rangées dans le fichier du mois correspondant, triées par date.
+    // Entries go to their month's file, sorted by date.
     let september = store.month("2026-09".parse().unwrap()).unwrap();
     assert_eq!(september.entries.iter().map(|e| e.id.as_str()).collect::<Vec<_>>(), vec!["a", "b"]);
     assert_eq!(store.month("2026-10".parse().unwrap()).unwrap().entries.len(), 1);
     assert_eq!(store.months().unwrap().len(), 2);
 
-    // Le JSON écrit est relisible tel quel.
+    // The JSON written can be read back as is.
     let raw = std::fs::read_to_string(store.month_path("2026-09".parse().unwrap())).unwrap();
     assert!(raw.contains("\"month\": \"2026-09\""), "{raw}");
     assert!(raw.contains("\"start\": \"09:00\""), "{raw}");
@@ -330,7 +329,7 @@ mod tests {
 
     assert!(store.month("2026-09".parse().unwrap()).unwrap().entries.is_empty());
     assert_eq!(store.find_entry("x").unwrap().unwrap().0.to_string(), "2026-10");
-    // Un mois vidé ne laisse pas de fichier derrière lui.
+    // A month emptied leaves no file behind.
     assert!(!store.month_path("2026-09".parse().unwrap()).exists());
 
     assert!(store.delete_entry("x").unwrap().is_some());

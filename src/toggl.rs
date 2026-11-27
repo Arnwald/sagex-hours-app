@@ -1,11 +1,11 @@
-//! Rapatriement de l'historique depuis Toggl Track.
+//! Brings the history back from Toggl Track.
 //!
-//! Deux chemins d'accès : l'API v9 (`/me/time_entries`), limitée aux derniers
-//! mois sur le plan gratuit, et la Reports API v3 qui pagine sur des périodes
-//! plus longues. On tente la seconde en premier et on retombe sur la première.
+//! Two ways in: the v9 API (`/me/time_entries`), limited to the last few
+//! months on the free plan, and the Reports API v3, which pages over longer
+//! periods. The latter is tried first, falling back to the former.
 //!
-//! La correspondance Toggl → SageX passe par les tâches du catalogue : chacune
-//! porte le couple (client, projet) Toggl dont elle provient.
+//! The Toggl → SageX mapping goes through the catalog's tasks: each one carries
+//! the Toggl (client, project) pair it comes from.
 
 use crate::model::{Catalog, Entry, Source};
 use crate::settings::Settings;
@@ -42,7 +42,7 @@ struct TogglClientRecord {
   name: String,
 }
 
-/// Saisie Toggl ramenée à ce qui nous intéresse.
+/// A Toggl entry, reduced to what we need.
 #[derive(Debug, Clone)]
 pub struct TogglEntry {
   pub id: i64,
@@ -96,33 +96,33 @@ impl TogglClient {
       .basic_auth(&self.token, Some("api_token"))
       .send()
       .await
-      .with_context(|| format!("appel de {url}"))?;
+      .with_context(|| format!("calling {url}"))?;
     if !response.status().is_success() {
       bail!("{url} → {} {}", response.status(), response.text().await.unwrap_or_default());
     }
-    Ok(response.json().await.with_context(|| format!("réponse de {url}"))?)
+    Ok(response.json().await.with_context(|| format!("response from {url}"))?)
   }
 
   pub async fn workspaces(&self) -> Result<Vec<Workspace>> {
     self.get(&format!("{API}/workspaces")).await
   }
 
-  /// Espace de travail choisi par son nom, ou le premier disponible.
+  /// The workspace chosen by name, or the first available.
   pub async fn workspace(&self, wanted: Option<&str>) -> Result<Workspace> {
     let workspaces = self.workspaces().await?;
     if workspaces.is_empty() {
-      bail!("aucun espace de travail Toggl accessible avec ce jeton");
+      bail!("no Toggl workspace is accessible with this token");
     }
     match wanted {
       Some(name) => workspaces
         .into_iter()
         .find(|w| w.name == name)
-        .with_context(|| format!("espace de travail « {name} » introuvable")),
-      None => Ok(workspaces.into_iter().next().expect("liste non vide")),
+        .with_context(|| format!("workspace \"{name}\" not found")),
+      None => Ok(workspaces.into_iter().next().expect("non-empty list")),
     }
   }
 
-  /// Projet Toggl → (nom du projet, nom du client).
+  /// Toggl project → (project name, client name).
   pub async fn project_index(&self, workspace: i64) -> Result<HashMap<i64, (String, String)>> {
     let projects: Vec<TogglProject> = self.get(&format!("{API}/workspaces/{workspace}/projects")).await?;
     let clients: Vec<TogglClientRecord> =
@@ -140,13 +140,13 @@ impl TogglClient {
     )
   }
 
-  /// Saisies de la période, Reports API d'abord puis repli sur l'API v9.
+  /// The period's entries, from the Reports API first, falling back to the v9 API.
   pub async fn entries(&self, workspace: i64, from: NaiveDate, to: NaiveDate) -> Result<(Vec<TogglEntry>, &'static str)> {
     match self.entries_via_reports(workspace, from, to).await {
       Ok(entries) => Ok((entries, "reports v3")),
       Err(reports_error) => {
-        tracing::warn!("Reports API indisponible ({reports_error:#}), repli sur l'API v9");
-        let entries = self.entries_via_v9(from, to).await.context("repli sur l'API v9")?;
+        tracing::warn!("Reports API unavailable ({reports_error:#}), falling back to the v9 API");
+        let entries = self.entries_via_v9(from, to).await.context("falling back to the v9 API")?;
         Ok((entries, "api v9"))
       }
     }
@@ -181,7 +181,7 @@ impl TogglClient {
             id: entry.id,
             description: group.description.clone().unwrap_or_default(),
             project_id: group.project_id,
-            start: DateTime::parse_from_rfc3339(&entry.start).with_context(|| format!("date « {} »", entry.start))?,
+            start: DateTime::parse_from_rfc3339(&entry.start).with_context(|| format!("date \"{}\"", entry.start))?,
             seconds: entry.seconds,
           });
         }
@@ -196,19 +196,19 @@ impl TogglClient {
   }
 
   async fn entries_via_v9(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<TogglEntry>> {
-    // `end_date` est exclusif côté v9.
+    // `end_date` is exclusive in v9.
     let url = format!("{API}/me/time_entries?start_date={from}&end_date={}", to + Duration::days(1));
     let raw: Vec<V9Entry> = self.get(&url).await?;
     raw
       .into_iter()
-      // Une durée négative signale un chronomètre encore en cours.
+      // A negative duration marks a timer still running.
       .filter(|entry| entry.duration > 0)
       .map(|entry| {
         Ok(TogglEntry {
           id: entry.id,
           description: entry.description.unwrap_or_default(),
           project_id: entry.project_id,
-          start: DateTime::parse_from_rfc3339(&entry.start).with_context(|| format!("date « {} »", entry.start))?,
+          start: DateTime::parse_from_rfc3339(&entry.start).with_context(|| format!("date \"{}\"", entry.start))?,
           seconds: entry.duration,
         })
       })
@@ -217,7 +217,7 @@ impl TogglClient {
 }
 
 // ---------------------------------------------------------------------------
-// Conversion vers les saisies
+// Conversion to entries
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Default, serde::Serialize)]
@@ -225,7 +225,7 @@ pub struct ImportSummary {
   pub fetched: usize,
   pub converted: usize,
   pub duplicates: usize,
-  /// Couples (client, projet) Toggl sans tâche correspondante, avec leur volume.
+  /// Toggl (client, project) pairs with no matching task, with their volume.
   pub unmapped: Vec<UnmappedGroup>,
   pub source: String,
 }
@@ -238,9 +238,9 @@ pub struct UnmappedGroup {
   pub minutes: u32,
 }
 
-/// Transforme les saisies Toggl en saisies locales.
+/// Turns Toggl entries into local entries.
 ///
-/// `existing_toggl_ids` évite de réimporter deux fois la même chose.
+/// `existing_toggl_ids` prevents importing the same thing twice.
 pub fn convert(
   toggl_entries: &[TogglEntry],
   projects: &HashMap<i64, (String, String)>,
@@ -298,7 +298,7 @@ pub fn convert(
   (entries, summary)
 }
 
-/// Accès aux heures/minutes sans dépendre du trait `Timelike` chez l'appelant.
+/// Hours/minutes access without the caller needing the `Timelike` trait.
 trait HourMinute {
   fn hour_minute(&self) -> (u32, u32);
 }
@@ -310,11 +310,11 @@ impl HourMinute for NaiveTime {
   }
 }
 
-/// Jeton effectif, avec un message explicite s'il manque.
+/// The effective token, with an explicit message when it is missing.
 pub fn token_of(settings: &Settings) -> Result<String> {
   settings
     .toggl_token()
-    .context("aucun jeton Toggl : renseigne `toggl.api_token` dans settings.json ou la variable TOGGL_API_TOKEN")
+    .context("no Toggl token: set `toggl.api_token` in settings.json or the TOGGL_API_TOKEN variable")
 }
 
 #[cfg(test)]
@@ -375,7 +375,7 @@ mod tests {
     assert_eq!(entry.comment, "Bibliographie");
     assert_eq!(entry.toggl_id, Some(1));
     assert_eq!(entry.source, Source::Toggl);
-    // L'heure est convertie dans le fuseau local et la fin déduite.
+    // The time is converted to the local time zone and the end derived.
     assert_eq!(entry.end.unwrap() - entry.start.unwrap(), Duration::minutes(90));
   }
 
@@ -408,10 +408,10 @@ mod tests {
 }
 
 // ---------------------------------------------------------------------------
-// Import complet
+// Full import
 // ---------------------------------------------------------------------------
 
-/// Récupère la période chez Toggl et l'enregistre (sauf en `dry_run`).
+/// Fetches the period from Toggl and saves it (unless `dry_run`).
 pub async fn run(store: &crate::store::Store, from: NaiveDate, to: NaiveDate, dry_run: bool) -> Result<ImportSummary> {
   let settings = store.settings()?;
   let client = TogglClient::new(token_of(&settings)?)?;
@@ -419,7 +419,7 @@ pub async fn run(store: &crate::store::Store, from: NaiveDate, to: NaiveDate, dr
   let projects = client.project_index(workspace.id).await?;
   let (toggl_entries, source) = client.entries(workspace.id, from, to).await?;
 
-  // Les identifiants déjà présents rendent l'import rejouable sans doublon.
+  // The identifiers already present make the import repeatable without duplicates.
   let mut known = std::collections::HashSet::new();
   for month in crate::model::YearMonth::range(from, to) {
     for entry in store.month(month)?.entries {
@@ -431,7 +431,7 @@ pub async fn run(store: &crate::store::Store, from: NaiveDate, to: NaiveDate, dr
 
   let catalog = store.catalog()?;
   let (entries, mut summary) = convert(&toggl_entries, &projects, &catalog, &known);
-  summary.source = format!("{source} · espace « {} »", workspace.name);
+  summary.source = format!("{source} · workspace \"{}\"", workspace.name);
 
   if !dry_run && !entries.is_empty() {
     store.insert_entries(entries)?;
@@ -441,24 +441,24 @@ pub async fn run(store: &crate::store::Store, from: NaiveDate, to: NaiveDate, dr
 
 impl ImportSummary {
   pub fn print(&self, dry_run: bool) {
-    println!("Toggl ({}) : {} saisie(s) récupérée(s).", self.source, self.fetched);
-    println!("  · {} converties{}", self.converted, if dry_run { " (rien écrit : --dry-run)" } else { "" });
+    println!("Toggl ({}): {} entries fetched.", self.source, self.fetched);
+    println!("  · {} converted{}", self.converted, if dry_run { " (nothing written: --dry-run)" } else { "" });
     if self.duplicates > 0 {
-      println!("  · {} déjà importées, ignorées", self.duplicates);
+      println!("  · {} already imported, skipped", self.duplicates);
     }
     if !self.unmapped.is_empty() {
       let total: u32 = self.unmapped.iter().map(|g| g.minutes).sum();
-      println!("  ! {} couple(s) client/projet sans tâche correspondante ({} au total) :", self.unmapped.len(), crate::export::format_hours(total));
+      println!("  ! {} client/project pairs with no matching task ({} in total):", self.unmapped.len(), crate::export::format_hours(total));
       for group in &self.unmapped {
         println!(
-          "      {} / {} → {} saisie(s), {}",
-          if group.client.is_empty() { "(sans client)" } else { &group.client },
+          "      {} / {} → {} entries, {}",
+          if group.client.is_empty() { "(no client)" } else { &group.client },
           group.project,
           group.entries,
           crate::export::format_hours(group.minutes)
         );
       }
-      println!("      Crée les tâches manquantes dans la fenêtre « Gérer », puis relance l'import.");
+      println!("      Create the missing tasks in the Manage window, then run the import again.");
     }
   }
 }

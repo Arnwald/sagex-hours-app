@@ -1,4 +1,6 @@
-// Accès à l'API. Le jeton n'est demandé que si le serveur en exige un.
+// API access. The token is only asked for if the server requires one.
+
+import { lang, t } from './i18n.js';
 
 const TOKEN_KEY = 'sagex-hours-token';
 
@@ -7,11 +9,12 @@ export function token() {
 }
 
 export function setToken(value) {
-  try { value ? localStorage.setItem(TOKEN_KEY, value) : localStorage.removeItem(TOKEN_KEY); } catch { /* mode privé */ }
+  try { value ? localStorage.setItem(TOKEN_KEY, value) : localStorage.removeItem(TOKEN_KEY); } catch { /* private mode */ }
 }
 
 function headers(extra = {}) {
-  const head = { ...extra };
+  // The server localises its own messages (errors, report issues, holidays).
+  const head = { 'Accept-Language': lang(), ...extra };
   const value = token();
   if (value) head['X-Auth-Token'] = value;
   return head;
@@ -23,9 +26,9 @@ async function request(method, path, body) {
 
   const response = await fetch(path, options);
   if (response.status === 401) {
-    const given = window.prompt("Cette instance demande un jeton d'accès :");
+    const given = window.prompt(t('api.tokenPrompt'));
     if (given) { setToken(given); return request(method, path, body); }
-    throw new Error("jeton d'accès requis");
+    throw new Error(t('api.tokenRequired'));
   }
   const text = await response.text();
   const payload = text ? JSON.parse(text) : null;
@@ -54,14 +57,15 @@ export const api = {
   deleteItem: (kind, id, force = false) => request('DELETE', `/api/catalog/${kind}/${id}?force=${force}`),
 };
 
-/** URL d'un téléchargement, jeton inclus si nécessaire. */
+/** URL of a download, with the interface language and the token if one is needed. */
 export function downloadUrl(path) {
+  let url = path + (path.includes('?') ? '&' : '?') + 'lang=' + lang();
   const value = token();
-  if (!value) return path;
-  return path + (path.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(value);
+  if (value) url += '&token=' + encodeURIComponent(value);
+  return url;
 }
 
-/** Flux d'évènements : rappelle `onChange` à chaque modification de la base. */
+/** Event stream: calls `onChange` on every change to the database. */
 export function listen(onChange) {
   let source;
   const connect = () => {

@@ -1,4 +1,4 @@
-/* Palette : claire par défaut, sombre selon le réglage du système. */
+/* Palette: light by default, dark following the system setting. */
 :root {
   color-scheme: light dark;
   --bg: #f5f6f8;
@@ -38,7 +38,7 @@
 
 * { box-sizing: border-box; }
 
-/* `display:flex` sur un élément masqué l'emporterait sur l'attribut hidden. */
+/* `display:flex` on a hidden element would override the hidden attribute. */
 [hidden] { display: none !important; }
 
 body {
@@ -96,6 +96,7 @@ textarea { resize: vertical; min-height: 54px; }
 .segmented { display: flex; gap: 2px; background: var(--surface-2); padding: 2px; border-radius: var(--radius); }
 .segmented button { border: none; background: none; padding: 4px 12px; }
 .segmented button[aria-pressed="true"] { background: var(--surface); box-shadow: var(--shadow); color: var(--accent); }
+.lang-switch button { padding: 4px 8px; font-size: 11px; font-weight: 600; letter-spacing: .04em; }
 
 .totals { display: flex; gap: 14px; align-items: baseline; color: var(--text-dim); white-space: nowrap; }
 .totals b { color: var(--text); font-variant-numeric: tabular-nums; font-size: 14px; }
@@ -126,7 +127,7 @@ main { display: flex; flex: 1; min-height: 0; }
 
 .view { flex: 1; min-width: 0; overflow: auto; position: relative; }
 
-/* ---------- grille de la semaine ---------- */
+/* ---------- week grid ---------- */
 
 .week { display: grid; grid-template-columns: 52px repeat(7, minmax(0, 1fr)); min-width: 720px; }
 .week-head {
@@ -179,7 +180,7 @@ main { display: flex; flex: 1; min-height: 0; }
   background: var(--accent-soft); border: 1px dashed var(--accent); z-index: 5; pointer-events: none;
 }
 
-/* ---------- vue mois ---------- */
+/* ---------- month view ---------- */
 
 .month { padding: 14px 18px 40px; max-width: 1100px; }
 .cards { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 16px; }
@@ -222,9 +223,9 @@ tr.holiday td { color: var(--warning); }
 .bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; min-width: 90px; }
 .bar > span { display: block; height: 100%; background: var(--accent); }
 
-/* ---------- panneau d'édition ---------- */
+/* ---------- editor panel ---------- */
 
-/* Colonne de droite : elle pousse la vue au lieu de recouvrir la barre du haut. */
+/* Right-hand column: it pushes the view aside instead of covering the top bar. */
 .editor {
   width: 324px; flex: 0 0 324px; min-height: 0;
   background: var(--surface); border-left: 1px solid var(--border);
@@ -239,7 +240,7 @@ tr.holiday td { color: var(--warning); }
 .row { display: flex; gap: 8px; }
 .row > * { flex: 1; }
 
-/* ---------- divers ---------- */
+/* ---------- miscellaneous ---------- */
 
 .banner {
   display: flex; align-items: center; gap: 12px;

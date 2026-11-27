@@ -1,10 +1,10 @@
-// Grille de la semaine : affichage, création par glissé, déplacement et
-// redimensionnement des saisies.
+// Week grid: display, creating entries by dragging, moving and resizing them.
 
-import { DAY_NAMES, escapeHtml, hhmm, readableOn, toMinutes, toTime } from './format.js';
+import { escapeHtml, hhmm, readableOn, toMinutes, toTime } from './format.js';
+import { dayShort, t } from './i18n.js';
 
 const PX_PER_HOUR = 46;
-const MIN_HEIGHT = 15; // hauteur mini d'un bloc, en pixels
+const MIN_HEIGHT = 15; // minimum height of a block, in pixels
 
 export function renderWeek(root, ctx) {
   const { days, settings } = ctx;
@@ -21,7 +21,7 @@ export function renderWeek(root, ctx) {
       ${days.map((day) => dayHead(day, ctx)).join('')}
     </div>
     <div class="allday-row">
-      <div class="allday-label">sans<br>horaire</div>
+      <div class="allday-label">${t('week.untimed')}</div>
       ${days.map((day) => `
         <div class="allday" data-date="${day.date}">
           ${day.entries.filter((e) => !timed(e)).map((entry) => chip(entry, ctx)).join('')}
@@ -42,7 +42,7 @@ export function renderWeek(root, ctx) {
 }
 
 // ---------------------------------------------------------------------------
-// Rendu
+// Rendering
 // ---------------------------------------------------------------------------
 
 function dayHead(day, ctx) {
@@ -53,7 +53,7 @@ function dayHead(day, ctx) {
   if (day.holiday) classes.push('holiday');
   return `
     <div class="${classes.join(' ')}" data-date="${day.date}">
-      <div class="name">${DAY_NAMES[(date.getDay() + 6) % 7]}${day.holiday ? ' · ' + escapeHtml(day.holiday) : ''}</div>
+      <div class="name">${dayShort(date)}${day.holiday ? ' · ' + escapeHtml(day.holiday) : ''}</div>
       <div class="num">${date.getDate()}</div>
       <div class="sum">${day.minutes ? hhmm(day.minutes) : '—'}</div>
     </div>`;
@@ -84,7 +84,7 @@ function nowLine(from, to) {
   return `<div class="now-line" style="top:${((minutes - from * 60) / 60) * PX_PER_HOUR}px"></div>`;
 }
 
-/** Répartit les saisies qui se chevauchent sur plusieurs colonnes. */
+/** Spreads overlapping entries over several columns. */
 function layout(entries, dayStart) {
   const items = entries
     .map((entry) => {
@@ -99,7 +99,7 @@ function layout(entries, dayStart) {
     if (index === -1) { columns.push([item]); index = columns.length - 1; } else { columns[index].push(item); }
     item.column = index;
   }
-  // Un groupe de saisies qui se recouvrent partage la largeur disponible.
+  // A group of overlapping entries shares the available width.
   for (const item of items) {
     item.columns = columns.filter((column) =>
       column.some((other) => other.start < item.end && other.end > item.start)).length || 1;
@@ -114,7 +114,7 @@ function block(item, ctx) {
   const width = 100 / columns;
   const color = ctx.colorOf(entry);
   const title = escapeHtml(entry.comment || ctx.labelOf(entry));
-  // Sous 32 px, la seconde ligne serait coupée : tout tient sur une seule.
+  // Under 32 px the second line would be cut off: everything goes on one line.
   const inner = height < 32
     ? `<span class="t">${entry.start.slice(0, 5)} · ${title} · ${hhmm(entry.minutes)}</span>`
     : `<span class="t">${title}</span>
@@ -146,7 +146,7 @@ function wire(root, ctx, bounds) {
   const snap = ctx.settings.ui.slot_minutes || 15;
   const columns = () => Array.from(root.querySelectorAll('.day-col'));
 
-  /** Colonne sous le pointeur (utile quand on déplace une saisie d'un jour à l'autre). */
+  /** Column under the pointer (useful when moving an entry from one day to another). */
   const columnAt = (x, y) => columns().find((column) => {
     const rect = column.getBoundingClientRect();
     return x >= rect.left && x <= rect.right && y >= rect.top - 4 && y <= rect.bottom + 4;
@@ -190,7 +190,7 @@ function wire(root, ctx, bounds) {
   });
 }
 
-/** Déplacement ou redimensionnement d'une saisie existante. */
+/** Moving or resizing an existing entry. */
 function dragEntry({ event, root, ctx, blockEl, entry, resizing, snap, bounds, columnAt, minutesAt }) {
   event.preventDefault();
   const startPointer = { x: event.clientX, y: event.clientY };
@@ -241,7 +241,7 @@ function dragEntry({ event, root, ctx, blockEl, entry, resizing, snap, bounds, c
   root.querySelector('.week')?.appendChild(preview);
 }
 
-/** Création par glissé sur une zone libre. */
+/** Creating an entry by dragging over free space. */
 function dragNew({ event, ctx, column, snap, bounds, minutesAt }) {
   event.preventDefault();
   const anchor = minutesAt(column, event.clientY);
@@ -276,7 +276,7 @@ function dragNew({ event, ctx, column, snap, bounds, minutesAt }) {
   document.addEventListener('pointerup', onUp);
 }
 
-/** Dépôt d'une tâche depuis la barre latérale. */
+/** Dropping a task from the sidebar. */
 export function presetDropTarget(root, clientX, clientY, settings) {
   const column = Array.from(root.querySelectorAll('.day-col')).find((element) => {
     const rect = element.getBoundingClientRect();

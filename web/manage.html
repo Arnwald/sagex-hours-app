@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Projets, activités et tâches — SageX</title>
+  <title data-i18n="manage.title">Projets, activités et tâches — SageX</title>
   <link rel="stylesheet" href="/style.css">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='14'>⚙</text></svg>">
   <style>
@@ -20,21 +20,26 @@
     .swatch { width: 26px; height: 22px; padding: 0; border: 1px solid var(--border); border-radius: 4px; }
     .archived td:not(:last-child) { opacity: .45; }
     .add-row td { background: var(--surface-2); }
+    .page-head { display: flex; align-items: center; gap: 12px; margin: 0 0 16px; }
+    .page-head h1 { font-size: 16px; margin: 0; }
   </style>
 </head>
 <body>
 <div class="page">
-  <h1 style="font-size:16px;margin:0 0 4px">Projets, activités et tâches</h1>
-  <p class="hint" style="margin:0 0 16px">
-    Les trois listes sont indépendantes : n'importe quelle activité peut servir à n'importe quel projet, comme dans SageX.
-    Les identifiants (en gris) sont ceux à utiliser dans l'API.
-  </p>
+  <div class="page-head">
+    <h1 data-i18n="manage.heading" data-i18n-title="manage.intro">Projets, activités et tâches</h1>
+    <div class="spacer"></div>
+    <div class="segmented lang-switch" id="lang-switch" role="group" aria-label="Langue" data-i18n-aria-label="lang.switch">
+      <button data-lang="fr" lang="fr" title="Français" aria-pressed="true">FR</button>
+      <button data-lang="en" lang="en" title="English" aria-pressed="false">EN</button>
+    </div>
+  </div>
 
   <div class="tabs" role="group">
-    <button data-tab="projects" aria-pressed="true">Projets SageX</button>
-    <button data-tab="activities" aria-pressed="false">Activités SageX</button>
-    <button data-tab="presets" aria-pressed="false">Tâches</button>
-    <button data-tab="settings" aria-pressed="false">Réglages</button>
+    <button data-tab="projects" aria-pressed="true" data-i18n="manage.tabProjects">Projets SageX</button>
+    <button data-tab="activities" aria-pressed="false" data-i18n="manage.tabActivities">Activités SageX</button>
+    <button data-tab="presets" aria-pressed="false" data-i18n="manage.tabPresets">Tâches</button>
+    <button data-tab="settings" aria-pressed="false" data-i18n="manage.tabSettings">Réglages</button>
   </div>
 
   <div id="panel"></div>

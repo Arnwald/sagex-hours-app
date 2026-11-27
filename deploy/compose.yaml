@@ -1,6 +1,13 @@
-# Pile à coller dans Dockge (Compose → nouvelle pile → coller → Déployer).
+# sagex-hours on a Linux server with Docker, from the published image.
 #
-# Avant de déployer, adapter les trois valeurs marquées « À ADAPTER ».
+#   mkdir -p /srv/sagex-hours && cd /srv/sagex-hours
+#   (copy this file here as compose.yaml, adapt the three values marked ADAPT)
+#   docker compose up -d
+#   docker compose pull && docker compose up -d     # later, to update
+#
+# The image is private while the repository is: on the server, run once
+#   docker login ghcr.io -u <account> -p <token with read:packages>
+# (or make the package public in GitHub › Packages › Package settings).
 
 services:
   sagex-hours:
@@ -9,20 +16,21 @@ services:
     restart: unless-stopped
 
     ports:
-      # À ADAPTER si 8099 est déjà pris sur le NAS.
-      - "8099:8080"
+      # ADAPT if 8080 is taken. Colleagues open http://<server>:8080 over the VPN.
+      - "8080:8080"
 
     environment:
       TZ: Europe/Zurich
-      # À ADAPTER — obligatoire : sans jeton, quiconque atteint ce port
-      # lit et modifie tes heures. Génère-le avec : openssl rand -hex 24
-      SAGEX_TOKEN: "REMPLACE-MOI"
+      # ADAPT — required: without it, whoever reaches this port reads and
+      # changes the hours. It is the first administrator's key once several
+      # users are enabled; every colleague then gets a key of their own.
+      # Generate it with: openssl rand -hex 24
+      SAGEX_TOKEN: "REPLACE-ME"
 
     volumes:
-      # À ADAPTER — dataset TrueNAS qui contiendra la base en clair
-      # (catalog.json, settings.json, entries/, backups/).
-      - /mnt/tank/apps/sagex-hours:/data
+      # ADAPT — where the plain base lives on the server: users.json and one
+      # folder per user (users/<id>/). Back this folder up.
+      - /srv/sagex-hours/data:/data
 
-    # L'utilisateur « apps » de TrueNAS SCALE. Le dataset ci-dessus doit lui
-    # appartenir. Commenter cette ligne pour tourner en root à la place.
-    user: "568:568"
+    # The base's files belong to this user on the server (default: root).
+    # user: "1000:1000"

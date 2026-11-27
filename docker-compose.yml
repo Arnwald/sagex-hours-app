@@ -1,3 +1,5 @@
+# Builds the image from this checkout (heavier: Rust compiles on the server at
+# every update). deploy/compose.yaml uses the published image instead.
 services:
   sagex-hours:
     build: .
@@ -8,13 +10,15 @@ services:
       - "8080:8080"
     environment:
       TZ: Europe/Zurich
-      # Jeton d'accès : sans lui, l'instance est ouverte à qui peut l'atteindre.
-      # Indispensable dès que l'app sort du réseau local.
-      # SAGEX_TOKEN: "un-jeton-long-et-aleatoire"
-      # Permet l'import Toggl sans écrire le jeton dans settings.json.
+      # Single user: the access token. Several users: the first administrator's
+      # key when they are enabled (each user then has their own key).
+      # Generate it with: openssl rand -hex 24
+      # SAGEX_TOKEN: "a-long-random-token"
+      # Lets the Toggl import run without writing the token into settings.json.
       # TOGGL_API_TOKEN: "..."
     volumes:
-      # La base en clair : catalog.json, settings.json, entries/, backups/
+      # The plain base: users.json and users/<id>/ (or, single-user,
+      # catalog.json, settings.json, entries/, backups/).
       - ./data:/data
-    # Sur TrueNAS, aligner sur le propriétaire du dataset monté :
+    # To match the owner of the mounted folder:
     # user: "1000:1000"

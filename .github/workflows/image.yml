@@ -1,5 +1,5 @@
-# Publie l'image sur GHCR à chaque push sur main.
-# Dockge n'a alors plus qu'à tirer ghcr.io/arnwald/sagex-hours-app:latest.
+# Publishes the image on GHCR at every push to main; the server then only
+# pulls ghcr.io/arnwald/sagex-hours-app:latest.
 
 name: image
 
@@ -30,7 +30,7 @@ jobs:
       - id: meta
         uses: docker/metadata-action@v5
         with:
-          # GHCR n'accepte que des minuscules.
+          # GHCR only accepts lower case.
           images: ghcr.io/arnwald/sagex-hours-app
           tags: |
             type=raw,value=latest,enable={{is_default_branch}}
@@ -40,7 +40,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: .
-          # TrueNAS SCALE est en x86_64 ; pas de cross-build ARM, inutile et lent.
+          # The servers are x86_64; no ARM cross-build, slow and unneeded.
           platforms: linux/amd64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
